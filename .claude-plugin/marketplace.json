@@ -1,0 +1,8 @@
+{
+	"name": "prompt-enhancer",
+	"description": "prompt-enhancer as a local Claude Code marketplace, so it can be installed from a checkout.",
+	"owner": { "name": "ataberkus" },
+	"plugins": [
+		{ "name": "prompt-enhancer", "source": "./", "description": "Rewrites a prompt into a repo-grounded spec before it is sent: start a prompt with ::e." }
+	]
+}

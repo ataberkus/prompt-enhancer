@@ -1,0 +1,7 @@
+{
+	"name": "prompt-enhancer",
+	"version": "0.1.0",
+	"description": "Rewrites a prompt into a repo-grounded spec before it is sent: start a prompt with ::e.",
+	"author": { "name": "ataberkus" },
+	"repository": "https://github.com/ataberkus/prompt-enhancer"
+}

@@ -25,7 +25,7 @@ export default function promptEnhancer(pi) {
 		ctx.ui.setStatus(STATUS, `✨ Enhancing with ${p.label}… (${KEY} cancels)`);
 		try {
 			const text = await runEnhance({
-				draft, messages: branchMessages(ctx.sessionManager.getBranch()), cwd: ctx.cwd, omp: OMP, model: p.model, thinking: p.thinking,
+				draft, messages: branchMessages(ctx.sessionManager.getBranch()), cwd: ctx.cwd, bin: OMP, model: p.model, thinking: p.thinking,
 				signal: ctl.signal, onStep: s => ctx.ui.setStatus(STATUS, `✨ Enhancing: ${s}`),
 			});
 			// Never drop words typed while the enhancer ran.
