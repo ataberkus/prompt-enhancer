@@ -1,0 +1,44 @@
+tools:
+  xdev: false
+advisor:
+  enabled: false
+autolearn:
+  enabled: false
+  autoContinue: false
+compaction:
+  experimentalContextManagement: false
+memory:
+  backend: "off"
+checkpoint:
+  enabled: false
+todo:
+  enabled: false
+ask:
+  enabled: false
+fetch:
+  enabled: false
+astGrep:
+  enabled: false
+mcp:
+  enableProjectConfig: false
+disabledProviders:
+  - agent-plugins
+  - agents
+  - agents-md
+  - claude
+  - claude-md
+  - claude-plugins
+  - cline
+  - codex
+  - cursor
+  - custom-context
+  - gemini
+  - github
+  - mcp-json
+  - native
+  - omp-plugins
+  - opencode
+  - skillshare
+  - ssh-json
+  - vscode
+  - windsurf

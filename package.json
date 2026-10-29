@@ -1,0 +1,18 @@
+{
+	"name": "prompt-enhancer",
+	"version": "0.1.0",
+	"description": "Rewrites a coding-agent prompt into a repo-grounded spec. omp extension: alt+e on the composer, or /enhance.",
+	"type": "module",
+	"private": true,
+	"keywords": ["omp-plugin", "oh-my-pi", "prompt"],
+	"omp": {
+		"extensions": ["./omp/index.mjs"]
+	},
+	"files": ["core", "omp"],
+	"scripts": {
+		"test": "node --test"
+	},
+	"engines": {
+		"node": ">=20"
+	}
+}
