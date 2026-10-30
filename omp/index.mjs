@@ -7,6 +7,33 @@ const KEY = 'alt+e', STATUS = 'prompt-enhancer';
 // The omp binary running this extension (Tern ships its own); `omp` on PATH when omp runs from source under bun.
 const OMP = /^omp(\.exe)?$/i.test(path.basename(process.execPath)) ? process.execPath : 'omp';
 
+// The composer shows attachments as chips (`<icon> #N`, icon from the theme) that expand to `[Image #N, WxH]` on submit,
+// and omp drops every attachment whose chip or marker the sent text lacks. The enhancer sees `[Image #N]` markers; the
+// result gets each draft chip back, and any reference it left out is appended.
+const MARKER = /\[(Image|Video) #([1-9]\d*)(?:,[^\]\n]*)?\]/g;
+const esc = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const chipRe = icon => new RegExp(`${esc(icon)} #([1-9]\\d*)(?!\\d)`, 'gu');
+export const chipIcons = theme => Object.fromEntries([['Image', 'chip.image'], ['Video', 'chip.video']]
+	.map(([kind, key]) => [kind, theme?.symbol?.(key)]).filter(([, icon]) => icon));
+
+// → { text: the draft with chips as markers, refs: Map of `Image #N` → the draft's own token for it }
+export function draftAttachments(draft, icons) {
+	const refs = new Map();
+	let text = draft;
+	for (const [kind, icon] of Object.entries(icons)) {
+		for (const m of draft.matchAll(chipRe(icon))) refs.set(`${kind} #${m[1]}`, m[0]);
+		text = text.replace(chipRe(icon), `[${kind} #$1]`);
+	}
+	for (const m of draft.matchAll(MARKER)) refs.set(`${m[1]} #${m[2]}`, m[0]);
+	return { text, refs };
+}
+
+export function keepAttachments(text, refs) {
+	const out = text.replace(/\[(Image|Video) #([1-9]\d*)\]/g, (m, kind, n) => refs.get(`${kind} #${n}`) ?? m);
+	const missing = [...refs].filter(([key, token]) => !new RegExp(`${esc(token)}(?!\\d)|\\[${key}[,\\]]`, 'u').test(out));
+	return missing.length ? `${out}\n\n${missing.map(([, token]) => token).join(' ')}` : out;
+}
+
 export default function promptEnhancer(pi) {
 	pi.setLabel('Prompt Enhancer');
 	let job = null, last = null; // job: AbortController of the running enhance; last: { draft, text } of the latest result
@@ -24,10 +51,11 @@ export default function promptEnhancer(pi) {
 		job = ctl;
 		ctx.ui.setStatus(STATUS, `✨ Enhancing with ${p.label}… (${KEY} cancels)`);
 		try {
-			const text = await runEnhance({
-				draft, messages: branchMessages(ctx.sessionManager.getBranch()), cwd: ctx.cwd, bin: OMP, model: p.model, thinking: p.thinking,
+			const att = draftAttachments(draft, chipIcons(ctx.ui.theme));
+			const text = keepAttachments(await runEnhance({
+				draft: att.text, messages: branchMessages(ctx.sessionManager.getBranch()), cwd: ctx.cwd, bin: OMP, model: p.model, thinking: p.thinking,
 				signal: ctl.signal, onStep: s => ctx.ui.setStatus(STATUS, `✨ Enhancing: ${s}`),
-			});
+			}), att.refs);
 			// Never drop words typed while the enhancer ran.
 			const now = ctx.ui.getEditorText();
 			if (now.trim() && now !== draft && !(await ctx.ui.confirm('Replace your prompt?', 'You changed the prompt while it was being enhanced. Replace it with the enhanced version?'))) return;

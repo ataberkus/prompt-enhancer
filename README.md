@@ -19,6 +19,9 @@ with `claude -p`. The Claude Code plugin does not need omp.
 
 If you change the composer while an enhance is running, you're asked before your text is replaced.
 
+Images and videos attached in the composer stay attached: the enhancer sees each as `[Image #N]`, and the result keeps
+its chip (one the enhancer left out is added at the end). The enhancer reads only the marker, not the image itself.
+
 Works in omp's terminal UI and in omp inside [Tern](https://stencil.so/tern).
 
 ### Claude Code
