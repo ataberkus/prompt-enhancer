@@ -3,9 +3,9 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { emptyOutput, enhancedOutput, failedOutput, parseDraft, transcriptMessages, transcriptModel } from '../claude/index.mjs';
+import { emptyOutput, enhancedOutput, failedOutput, parseDraft, pastedImages, transcriptMessages, transcriptModel } from '../claude/index.mjs';
 import { decide, refuse } from '../core/claude-guard.mjs';
-import { engines } from '../core/enhance.mjs';
+import { claudeArgs, claudeInput, engines } from '../core/enhance.mjs';
 
 test('transcriptMessages keeps only user and assistant chat text from a Claude Code transcript', () => {
 	const jsonl = [
@@ -74,6 +74,28 @@ test('claude engine events: tool_use is a step, result is the answer or the fail
 	ev({ type: 'result', subtype: 'success', is_error: true, result: 'Credit balance is too low' }, on);
 	ev({ type: 'result', subtype: 'error_max_turns', is_error: true }, on);
 	assert.deepEqual(seen, [['step', 'Read', 'a.js'], ['answer', '# Request'], ['error', 'Credit balance is too low'], ['error', 'error_max_turns']]);
+});
+
+test('pasted images: [Image #N] maps to the session image cache and rides in one stream-json message', t => {
+	const config = fs.mkdtempSync(path.join(os.tmpdir(), 'prompt-enhancer-cfg-'));
+	t.after(() => fs.rmSync(config, { recursive: true, force: true }));
+	const dir = path.join(config, 'image-cache', 's1');
+	fs.mkdirSync(dir, { recursive: true });
+	fs.writeFileSync(path.join(dir, '1.png'), 'PNG1');
+	fs.writeFileSync(path.join(dir, '12.jpeg'), 'JPG12');
+	const images = pastedImages('fix [Image #12] like [Image #1], see [Image #12]', 's1', config);
+	assert.deepEqual(images, [{ label: '[Image #12]', file: path.join(dir, '12.jpeg') }, { label: '[Image #1]', file: path.join(dir, '1.png') }]);
+	assert.deepEqual(pastedImages('no images', undefined, config), []);
+	assert.throws(() => pastedImages('[Image #2]', 's1', config), /\[Image #2\] was not found/);
+	assert.throws(() => pastedImages('[Image #1]', undefined, config), /was not found/);
+
+	assert.equal(claudeInput('<draft>x</draft>'), '<draft>x</draft>');
+	const msg = JSON.parse(claudeInput('<draft>x</draft>', images));
+	assert.deepEqual(msg.message.content.map(c => c.type === 'image' ? [c.source.media_type, Buffer.from(c.source.data, 'base64').toString()] : c.text),
+		['[Image #12]', ['image/jpeg', 'JPG12'], '[Image #1]', ['image/png', 'PNG1'], '<draft>x</draft>']);
+	assert.ok(claudeArgs({ lookups: 'L', images }).join(' ').includes('--input-format stream-json'));
+	assert.ok(!claudeArgs({ lookups: 'L' }).includes('--input-format'));
+	assert.equal(enhancedOutput('# Request', images).reason, `# Request\n\n[Image #12]: ${images[0].file}\n[Image #1]: ${images[1].file}`);
 });
 
 test('claude guard allows repository lookups only', () => {

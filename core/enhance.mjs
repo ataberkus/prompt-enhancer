@@ -30,12 +30,26 @@ export function ompArgs({ model, thinking } = {}) {
 // --setting-sources '' loads no settings files, so no user hooks, plugins or MCP config; --strict-mcp-config drops the
 // rest of MCP. Only Read/Grep/Glob exist, and claude-guard.mjs (a PreToolUse hook from --settings, which still loads)
 // allows or denies each call, counting lookups in `lookups`. dontAsk denies anything the guard leaves undecided.
-export function claudeArgs({ model, thinking, lookups } = {}) {
+export function claudeArgs({ model, thinking, lookups, images = [] } = {}) {
 	const q = p => `"${p.replace(/\\/g, '/')}"`; // forward slashes and double quotes work in both Git Bash and PowerShell
 	const settings = { hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: `node ${q(files.claudeGuard)} ${q(lookups)}`, timeout: 30 }] }] } };
 	return ['-p', '--output-format', 'stream-json', '--verbose', '--no-session-persistence', '--setting-sources', '', '--strict-mcp-config',
 		'--disable-slash-commands', '--tools', 'Read,Grep,Glob', '--permission-mode', 'dontAsk', '--settings', JSON.stringify(settings),
+		...(images.length ? ['--input-format', 'stream-json'] : []),
 		...(model ? ['--model', model] : []), ...(thinking ? ['--effort', thinking] : []), '--system-prompt', readFileSync(files.system, 'utf8')];
+}
+
+const MEDIA = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp' };
+// Images ride in one stream-json user message (text stdin cannot carry them), each after a `[Image #N]` label matching the draft.
+// images: [{ label, file }].
+export function claudeInput(text, images = []) {
+	if (!images.length) return text;
+	const content = images.flatMap(({ label, file }) => {
+		const media = MEDIA[path.extname(file).slice(1).toLowerCase()];
+		if (!media) throw new Error(`Not a supported image (png, jpg, gif, webp): ${file}`);
+		return [{ type: 'text', text: label }, { type: 'image', source: { type: 'base64', media_type: media, data: readFileSync(file).toString('base64') } }];
+	});
+	return JSON.stringify({ type: 'user', message: { role: 'user', content: [...content, { type: 'text', text }] } }) + '\n';
 }
 
 // Per engine: the default binary, its argv, and how one JSON output line reports a lookup, the answer or a failure.
@@ -48,7 +62,7 @@ export const engines = {
 		},
 	},
 	claude: {
-		bin: 'claude', args: claudeArgs,
+		bin: 'claude', args: claudeArgs, input: claudeInput,
 		event(f, on) {
 			if (f.type === 'assistant') for (const c of f.message?.content || []) { if (c?.type === 'tool_use') on.step(c.name, c.input); }
 			else if (f.type === 'result') f.is_error || f.subtype !== 'success' ? on.error(String(f.result || f.subtype)) : on.answer(String(f.result ?? ''));
@@ -109,12 +123,14 @@ export function cleanEnhanced(text) {
 
 // Resolves with the enhanced prompt; rejects with an Error (name 'AbortError' when `signal` aborted it).
 // `engine` is a key of `engines`; `bin` overrides its binary.
-export function runEnhance({ draft, messages = [], cwd, engine = 'omp', bin, model, thinking, signal, onStep = () => {} }) {
+export function runEnhance({ draft, messages = [], images = [], cwd, engine = 'omp', bin, model, thinking, signal, onStep = () => {} }) {
 	return new Promise((resolve, reject) => {
 		const eng = engines[engine];
 		if (!eng) throw new Error(`Unknown enhance engine: ${engine}`);
+		if (images.length && !eng.input) throw new Error(`The ${engine} engine takes no images.`);
+		const stdin = eng.input ? eng.input(enhanceInput(draft, messages), images) : enhanceInput(draft, messages);
 		const lookups = path.join(os.tmpdir(), `prompt-enhancer-${randomUUID()}.lookups`);
-		const child = spawn(bin || eng.bin, eng.args({ model, thinking, lookups }), {
+		const child = spawn(bin || eng.bin, eng.args({ model, thinking, lookups, images }), {
 			cwd, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, env: { ...process.env, NO_COLOR: '1', FORCE_COLOR: '0' },
 		});
 		let stderr = '', answer = '', failure = '', timedOut = false, done = false;
@@ -123,7 +139,7 @@ export function runEnhance({ draft, messages = [], cwd, engine = 'omp', bin, mod
 		signal?.addEventListener('abort', kill, { once: true });
 		if (signal?.aborted) kill();
 		child.stdin.on('error', () => {});
-		child.stdin.end(enhanceInput(draft, messages), 'utf8');
+		child.stdin.end(stdin, 'utf8');
 		child.stderr.on('data', b => { stderr = (stderr + b).slice(-8000); });
 		const on = { step: (name, args) => onStep(stepLabel(name, args, cwd)), answer: t => { answer = t; }, error: m => { failure = m; } };
 		createInterface({ input: child.stdout, crlfDelay: Infinity }).on('line', line => {

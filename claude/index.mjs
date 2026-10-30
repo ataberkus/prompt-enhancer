@@ -1,7 +1,9 @@
 // Claude Code front end: a UserPromptSubmit hook (hooks/hooks.json). A prompt starting with `::e` never reaches Claude;
 // a separate locked-down `claude -p` run rewrites the rest, and the hook blocks the submit with the enhanced prompt as its
 // message, to copy and send. Needs only Claude Code and node; no omp.
-import { readFileSync, realpathSync } from 'node:fs';
+import { readdirSync, readFileSync, realpathSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { contentText, runEnhance } from '../core/enhance.mjs';
 
@@ -12,6 +14,20 @@ export const ENV = { claude: 'PROMPT_ENHANCER_CLAUDE', model: 'PROMPT_ENHANCER_M
 export function parseDraft(prompt) {
 	const m = String(prompt ?? '').match(/^\s*::e(?:\s+([\s\S]*))?$/);
 	return m ? (m[1] ?? '').trim() : null;
+}
+
+// A pasted image reaches the hook only as `[Image #N]` in the prompt; Claude Code saved it on paste as
+// <config dir>/image-cache/<session id>/<N>.<png|jpeg|…>. Returns [{ label, file }] in draft order; throws when one is missing.
+// shortcut: undocumented Claude Code 2.1.123 cache layout; switch to the hook's own image field if Claude Code adds one.
+export function pastedImages(draft, sessionId, configDir = process.env.CLAUDE_CONFIG_DIR ?? path.join(os.homedir(), '.claude')) {
+	const dir = path.join(configDir, 'image-cache', String(sessionId ?? ''));
+	let names = [];
+	try { names = readdirSync(dir); } catch {}
+	return [...new Set(String(draft).match(/\[Image #\d+\]/g) ?? [])].map(label => {
+		const n = label.slice(8, -1), name = names.find(f => f.startsWith(n + '.'));
+		if (!sessionId || !name) throw new Error(`${label} was not found in ${dir}. Paste it again, or attach it after enhancing.`);
+		return { label, file: path.join(dir, name) };
+	});
 }
 
 // Claude Code injects these as user messages; like omp's custom messages they are not the chat.
@@ -47,7 +63,8 @@ export function transcriptModel(jsonl) {
 // Every outcome blocks the submit. The draft stays in the block message unless it was replaced by the enhanced prompt.
 const block = (reason, keepDraft) => ({ decision: 'block', reason, hookSpecificOutput: { hookEventName: 'UserPromptSubmit', suppressOriginalPrompt: !keepDraft } });
 
-export const enhancedOutput = text => block(text, false);
+// Pasted images do not survive the blocked submit, so their saved files are listed for Claude to read when the prompt is sent.
+export const enhancedOutput = (text, images = []) => block(images.length ? `${text}\n\n${images.map(i => `${i.label}: ${i.file}`).join('\n')}` : text, false);
 export const emptyOutput = () => block(`Write a prompt after ${MARKER} first, e.g. \`${MARKER} fix the login redirect\`.`, true);
 export function failedOutput(e) {
 	if (e?.name === 'AbortError') return block('Enhance cancelled.', true);
@@ -78,10 +95,11 @@ export async function main() {
 			model = transcriptModel(jsonl);
 		} catch {}
 		try {
+			const images = pastedImages(draft, input.session_id);
 			out = enhancedOutput(await runEnhance({
-				draft, messages, cwd: input.cwd || process.cwd(), engine: 'claude', bin: process.env[ENV.claude] || undefined,
+				draft, messages, images, cwd: input.cwd || process.cwd(), engine: 'claude', bin: process.env[ENV.claude] || undefined,
 				model: process.env[ENV.model] || model, thinking: process.env[ENV.effort] || undefined, signal: ctl.signal,
-			}));
+			}), images);
 		} catch (e) {
 			out = failedOutput(e);
 		}

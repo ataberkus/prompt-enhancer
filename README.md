@@ -33,6 +33,11 @@ Works in omp's terminal UI and in omp inside [Tern](https://stencil.so/tern).
 - The enhancer gets the last 6 turns of the Claude Code conversation, read from the session transcript, and runs on the
   session's current model.
 - Each enhance is a separate `claude -p` run, billed to your Claude account like any other request.
+- Images you paste into the draft (`[Image #1]`, e.g. with Alt+V) go to the enhancer with it. Claude Code saved each one
+  on paste under `~/.claude/image-cache/<session>/` (or `$CLAUDE_CONFIG_DIR`); the plugin reads them from there, since the
+  hook gets only the prompt text. A blocked prompt loses its pasted images, so the enhanced prompt ends with each image's
+  file path (`[Image #1]: …\1.png`) for Claude to read when you send it. If a pasted image's file is missing, the enhance
+  fails and says which one.
 
 Settings, read from the environment Claude Code runs in:
 
