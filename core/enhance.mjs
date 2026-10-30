@@ -40,7 +40,7 @@ export function claudeArgs({ model, thinking, lookups, images = [] } = {}) {
 }
 
 const MEDIA = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp' };
-// Images ride in one stream-json user message (text stdin cannot carry them), each after a `[Image #N]` label matching the draft.
+// Images ride in one stream-json user message (text stdin cannot carry them), each after its label: the path as the draft wrote it.
 // images: [{ label, file }].
 export function claudeInput(text, images = []) {
 	if (!images.length) return text;

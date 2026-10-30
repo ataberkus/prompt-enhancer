@@ -33,11 +33,11 @@ Works in omp's terminal UI and in omp inside [Tern](https://stencil.so/tern).
 - The enhancer gets the last 6 turns of the Claude Code conversation, read from the session transcript, and runs on the
   session's current model.
 - Each enhance is a separate `claude -p` run, billed to your Claude account like any other request.
-- Images you paste into the draft (`[Image #1]`, e.g. with Alt+V) go to the enhancer with it. Claude Code saved each one
-  on paste under `~/.claude/image-cache/<session>/` (or `$CLAUDE_CONFIG_DIR`); the plugin reads them from there, since the
-  hook gets only the prompt text. A blocked prompt loses its pasted images, so the enhanced prompt ends with each image's
-  file path (`[Image #1]: …\1.png`) for Claude to read when you send it. If a pasted image's file is missing, the enhance
-  fails and says which one.
+- To show the enhancer an image, write its file path in the draft: `::e match this layout shots/header.png`, `@shots/a.jpg`
+  or `"C:\My shots\a.webp"` (quotes for a path with spaces), relative to the session's folder or absolute. PNG, JPEG, GIF
+  and WebP files go to the enhancer with the draft; a path to no file stays plain text. The enhanced prompt keeps each path,
+  so Claude reads the image when you send it. Images pasted with Alt+V (`[Image #1]`) can't be used: Claude Code doesn't
+  pass them to plugins, so the enhance stops and asks for a path.
 
 Settings, read from the environment Claude Code runs in:
 
@@ -81,7 +81,7 @@ omp plugin link /path/to/prompt-enhancer
 
 ### Claude Code
 
-Needs `node` (20 or later) and `claude` on `PATH` (or `PROMPT_ENHANCER_CLAUDE`). Built against Claude Code 2.1.123.
+Needs `node` (20 or later) and `claude` on `PATH` (or `PROMPT_ENHANCER_CLAUDE`). Built against Claude Code 2.1.314.
 
 ```sh
 # try it for one session
