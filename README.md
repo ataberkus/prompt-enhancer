@@ -26,13 +26,18 @@ Works in omp's terminal UI and in omp inside [Tern](https://stencil.so/tern).
 
 ### Claude Code
 
-1. Start your prompt with `::e`, e.g. `::e add rate limiting to the upload endpoint`, and press Enter.
-2. Claude Code shows `✨ Enhancing prompt (::e)…`. Your draft is not sent to Claude.
-3. The enhanced prompt appears as the hook's block message. Copy it, edit it if you like, and send it.
+1. Start your prompt with `::e`, e.g. `::e add rate limiting to the upload endpoint`, or type `/enhance` and pick
+   `/prompt-enhancer:enhance`, then write the prompt after it. Press Enter.
+2. Claude Code shows `✨ Enhancing prompt…`. Your draft is not sent to Claude.
+3. The enhanced prompt appears as the hook's block message and is copied to the clipboard (`clip` on Windows, `pbcopy`
+   on macOS, `wl-copy` or `xclip` on Linux). Paste it into the prompt box with Ctrl+V, edit it if you like, and send it.
+   Claude Code doesn't let a hook put text back in the prompt box itself.
 
 - If the enhance fails or is cancelled, the message says so (`Enhance failed: …` / `Enhance cancelled.`) and shows your
   draft. Nothing is sent to Claude.
-- `::e` with nothing after it only shows a reminder.
+- `::e` or `/enhance` with nothing after it only shows a reminder.
+- Cloud sessions (an environment other than this computer) don't load locally installed plugins, so neither works there:
+  `::e` goes to Claude as written and `/enhance` only says the hook didn't run.
 - The enhancer gets the last 6 turns of the Claude Code conversation, read from the session transcript, and runs on the
   session's current model.
 - Each enhance is a separate `claude -p` run, billed to your Claude account like any other request.
@@ -66,7 +71,8 @@ the session's model and thinking level. In Claude Code it uses `PROMPT_ENHANCER_
 session's model and Claude Code's default effort.
 
 `core/enhance.mjs` has no host-specific code: `runEnhance({ engine: 'omp' | 'claude', … })`. `omp/index.mjs` (omp extension)
-and `claude/index.mjs` (Claude Code `UserPromptSubmit` hook, wired up in `hooks/hooks.json`) are thin front ends over it.
+and `claude/index.mjs` (Claude Code `UserPromptSubmit` and `UserPromptExpansion` hook, wired up in `hooks/hooks.json`;
+`commands/enhance.md` defines `/enhance`) are thin front ends over it.
 
 ## Install
 
@@ -95,7 +101,8 @@ claude plugin marketplace add /path/to/prompt-enhancer
 claude plugin install prompt-enhancer@prompt-enhancer
 ```
 
-The hook runs on every prompt you submit but exits at once unless the prompt starts with `::e`. Its timeout is 300 s,
+The `::e` hook runs on every prompt you submit but exits at once unless the prompt starts with `::e`; the `/enhance` hook
+runs only for that command. Their timeout is 300 s,
 above the enhancer's own 270 s limit.
 
 ## Develop

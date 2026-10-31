@@ -11,6 +11,19 @@
 					}
 				]
 			}
+		],
+		"UserPromptExpansion": [
+			{
+				"matcher": "prompt-enhancer:enhance",
+				"hooks": [
+					{
+						"type": "command",
+						"command": "node \"${CLAUDE_PLUGIN_ROOT}/claude/index.mjs\"",
+						"timeout": 300,
+						"statusMessage": "✨ Enhancing prompt (/enhance)…"
+					}
+				]
+			}
 		]
 	}
 }

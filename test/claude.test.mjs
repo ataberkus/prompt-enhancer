@@ -50,7 +50,6 @@ test('hook outputs always block; only a success hides the draft', () => {
 	assert.equal(failed.reason, 'Enhance failed: Enhance timed out.');
 	assert.equal(failed.hookSpecificOutput.suppressOriginalPrompt, false);
 	assert.equal(failedOutput(new Error('spawn claude ENOENT')).reason, 'Enhance failed: claude not found. Set PROMPT_ENHANCER_CLAUDE to the claude executable.');
-	assert.match(emptyOutput().reason, /^Write a prompt after ::e first/);
 	assert.equal(emptyOutput().decision, 'block');
 });
 

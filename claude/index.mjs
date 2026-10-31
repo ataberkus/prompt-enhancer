@@ -1,6 +1,7 @@
-// Claude Code front end: a UserPromptSubmit hook (hooks/hooks.json). A prompt starting with `::e` never reaches Claude;
-// a separate locked-down `claude -p` run rewrites the rest, and the hook blocks the submit with the enhanced prompt as its
-// message, to copy and send. Needs only Claude Code and node; no omp.
+// Claude Code front end: a UserPromptSubmit and a UserPromptExpansion hook (hooks/hooks.json). A prompt starting with `::e`,
+// or `/enhance <draft>`, never reaches Claude; a separate locked-down `claude -p` run rewrites the draft, and the hook blocks
+// the submit with the enhanced prompt as its message, also copied to the clipboard. Needs only Claude Code and node; no omp.
+import { spawnSync } from 'node:child_process';
 import { readFileSync, realpathSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -71,12 +72,21 @@ export function enhancedOutput(text, images = []) {
 	const missing = images.filter(i => !text.includes(i.label) && !text.includes(i.file));
 	return block(missing.length ? `${text}\n\n${missing.map(i => `Image: ${i.file}`).join('\n')}` : text, false);
 }
-export const emptyOutput = () => block(`Write a prompt after ${MARKER} first, e.g. \`${MARKER} fix the login redirect\`.`, true);
+export const emptyOutput = () => block(`Write a prompt after ${MARKER} or /enhance first, e.g. \`${MARKER} fix the login redirect\`.`, true);
 export function failedOutput(e) {
 	if (e?.name === 'AbortError') return block('Enhance cancelled.', true);
 	// spawn without a shell finds claude.exe but not an npm claude.cmd shim on Windows, and reports only `spawn claude ENOENT`.
 	const msg = /^spawn .+ ENOENT$/.test(e?.message) ? `claude not found. Set ${ENV.claude} to the claude executable.` : e?.message;
 	return block(`Enhance failed: ${msg}`, true);
+}
+
+// A hook can't put text back in the prompt box, so the enhanced prompt goes to the clipboard, to paste with Ctrl+V.
+const CLIPBOARD = { win32: [['clip']], darwin: [['pbcopy']], linux: [['wl-copy'], ['xclip', '-selection', 'clipboard']] };
+export function copyToClipboard(text) {
+	// clip.exe takes UTF-16LE (a BOM would be pasted too); anything else it reads in the console code page. pbcopy needs a UTF-8 locale.
+	const input = process.platform === 'win32' ? Buffer.from(text, 'utf16le') : text;
+	const opts = { input, stdio: ['pipe', 'ignore', 'ignore'], windowsHide: true, timeout: 5000, env: { ...process.env, LC_CTYPE: 'UTF-8' } };
+	return (CLIPBOARD[process.platform] || []).some(([cmd, ...args]) => spawnSync(cmd, args, opts).status === 0);
 }
 
 export async function main() {
@@ -86,7 +96,9 @@ export async function main() {
 		for await (const chunk of process.stdin) raw += chunk;
 		input = JSON.parse(raw);
 	} catch { return; } // not a hook payload: let the prompt through untouched
-	const draft = parseDraft(input?.prompt);
+	// `/enhance <draft>` arrives as UserPromptExpansion (hooks.json matches only that command); `::e <draft>` as UserPromptSubmit.
+	const expansion = input?.hook_event_name === 'UserPromptExpansion';
+	const draft = expansion ? String(input.command_args ?? '').trim() : parseDraft(input?.prompt);
 	if (draft === null) return;
 
 	let out;
@@ -106,10 +118,12 @@ export async function main() {
 				draft, messages, images, cwd, engine: 'claude', bin: process.env[ENV.claude] || undefined,
 				model: process.env[ENV.model] || model, thinking: process.env[ENV.effort] || undefined, signal: ctl.signal,
 			}), images);
+			if (copyToClipboard(out.reason)) out.reason = `Copied to the clipboard: paste it into the prompt box (Ctrl+V), edit it if you like, and send.\n\n${out.reason}`;
 		} catch (e) {
 			out = failedOutput(e);
 		}
 	}
+	if (expansion) out.hookSpecificOutput.hookEventName = 'UserPromptExpansion';
 	// Exit 2 blocks on every Claude Code version, even one that rejects the JSON; stderr is then the message shown.
 	process.stdout.write(JSON.stringify(out));
 	process.stderr.write(out.reason);
