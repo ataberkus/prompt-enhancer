@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { draftImages, emptyOutput, enhancedOutput, failedOutput, parseDraft, transcriptMessages, transcriptModel } from '../claude/index.mjs';
+import { draftImages, emptyOutput, enhanceEnv, enhancedOutput, failedOutput, parseDraft, transcriptMessages, transcriptModel } from '../claude/index.mjs';
 import { decide, refuse } from '../core/claude-guard.mjs';
 import { claudeArgs, claudeInput, engines } from '../core/enhance.mjs';
 
@@ -72,7 +72,24 @@ test('claude engine events: tool_use is a step, result is the answer or the fail
 	ev({ type: 'result', subtype: 'success', is_error: false, result: '# Request' }, on);
 	ev({ type: 'result', subtype: 'success', is_error: true, result: 'Credit balance is too low' }, on);
 	ev({ type: 'result', subtype: 'error_max_turns', is_error: true }, on);
-	assert.deepEqual(seen, [['step', 'Read', 'a.js'], ['answer', '# Request'], ['error', 'Credit balance is too low'], ['error', 'error_max_turns']]);
+	ev({ type: 'result', subtype: 'success', is_error: true, result: 'Claude Code can\'t use your Claude subscription', api_error_status: 403, api_error_code: 'oauth_not_allowed_for_organization' }, { ...on, error: (m, a) => seen.push(['error', m, a]) });
+	assert.deepEqual(seen, [['step', 'Read', 'a.js'], ['answer', '# Request'], ['error', 'Credit balance is too low'], ['error', 'error_max_turns'],
+		['error', 'Claude Code can\'t use your Claude subscription', { status: 403, code: 'oauth_not_allowed_for_organization' }]]);
+});
+
+// Hooks don't receive the session's CLAUDE_CODE_OAUTH_TOKEN; the child signs in with PROMPT_ENHANCER_OAUTH_TOKEN or its own login.
+test('PROMPT_ENHANCER_OAUTH_TOKEN becomes the child claude\'s CLAUDE_CODE_OAUTH_TOKEN', () => {
+	assert.deepEqual(enhanceEnv({ PROMPT_ENHANCER_OAUTH_TOKEN: 'sk-ant-oat01-x' }), { CLAUDE_CODE_OAUTH_TOKEN: 'sk-ant-oat01-x' });
+	assert.deepEqual(enhanceEnv({ CLAUDE_CODE_OAUTH_TOKEN: 'inherited' }), {});
+});
+
+test('a refused sign-in keeps Claude Code\'s message and says which sign-in was refused', () => {
+	const e = Object.assign(new Error('Claude Code can\'t use your Claude subscription'), { api: { status: 403, code: 'oauth_not_allowed_for_organization' } });
+	const login = failedOutput(e, { PROMPT_ENHANCER_CLAUDE: 'C:/bin/claude.exe' }).reason;
+	assert.match(login, /^Enhance failed: Claude Code can't use your Claude subscription\n\nThe API refused the sign-in of `C:\/bin\/claude\.exe` \(HTTP 403 oauth_not_allowed_for_organization\)\./);
+	assert.match(login, /set PROMPT_ENHANCER_OAUTH_TOKEN/);
+	assert.match(failedOutput(e, { PROMPT_ENHANCER_OAUTH_TOKEN: 't' }).reason, /\n\nThe API refused PROMPT_ENHANCER_OAUTH_TOKEN \(HTTP 403 /);
+	assert.equal(failedOutput(Object.assign(new Error('Overloaded'), { api: { status: 529 } }), {}).reason, 'Enhance failed: Overloaded');
 });
 
 test('draft images: existing image paths in the draft ride in one stream-json message', t => {

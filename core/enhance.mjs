@@ -65,7 +65,8 @@ export const engines = {
 		bin: 'claude', args: claudeArgs, input: claudeInput,
 		event(f, on) {
 			if (f.type === 'assistant') for (const c of f.message?.content || []) { if (c?.type === 'tool_use') on.step(c.name, c.input); }
-			else if (f.type === 'result') f.is_error || f.subtype !== 'success' ? on.error(String(f.result || f.subtype)) : on.answer(String(f.result ?? ''));
+			// A refused request (401/403: wrong account, organization or token) carries its HTTP status and error code.
+			else if (f.type === 'result') f.is_error || f.subtype !== 'success' ? on.error(String(f.result || f.subtype), f.api_error_status ? { status: f.api_error_status, code: f.api_error_code } : undefined) : on.answer(String(f.result ?? ''));
 		},
 	},
 };
@@ -121,9 +122,9 @@ export function cleanEnhanced(text) {
 	return wraps ? lines.slice(1, end === -1 ? undefined : -1).join('\n').trim() : t;
 }
 
-// Resolves with the enhanced prompt; rejects with an Error (name 'AbortError' when `signal` aborted it).
-// `engine` is a key of `engines`; `bin` overrides its binary.
-export function runEnhance({ draft, messages = [], images = [], cwd, engine = 'omp', bin, model, thinking, signal, onStep = () => {} }) {
+// Resolves with the enhanced prompt; rejects with an Error (name 'AbortError' when `signal` aborted it; `api` = { status, code }
+// when the API refused the run). `engine` is a key of `engines`; `bin` overrides its binary; `env` is added to the child's environment.
+export function runEnhance({ draft, messages = [], images = [], cwd, engine = 'omp', bin, env, model, thinking, signal, onStep = () => {} }) {
 	return new Promise((resolve, reject) => {
 		const eng = engines[engine];
 		if (!eng) throw new Error(`Unknown enhance engine: ${engine}`);
@@ -131,9 +132,9 @@ export function runEnhance({ draft, messages = [], images = [], cwd, engine = 'o
 		const stdin = eng.input ? eng.input(enhanceInput(draft, messages), images) : enhanceInput(draft, messages);
 		const lookups = path.join(os.tmpdir(), `prompt-enhancer-${randomUUID()}.lookups`);
 		const child = spawn(bin || eng.bin, eng.args({ model, thinking, lookups, images }), {
-			cwd, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, env: { ...process.env, NO_COLOR: '1', FORCE_COLOR: '0' },
+			cwd, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, env: { ...process.env, ...env, NO_COLOR: '1', FORCE_COLOR: '0' },
 		});
-		let stderr = '', answer = '', failure = '', timedOut = false, done = false;
+		let stderr = '', answer = '', failure = '', api, timedOut = false, done = false;
 		const kill = () => child.kill();
 		const timer = setTimeout(() => { timedOut = true; kill(); }, 270_000);
 		signal?.addEventListener('abort', kill, { once: true });
@@ -141,7 +142,7 @@ export function runEnhance({ draft, messages = [], images = [], cwd, engine = 'o
 		child.stdin.on('error', () => {});
 		child.stdin.end(stdin, 'utf8');
 		child.stderr.on('data', b => { stderr = (stderr + b).slice(-8000); });
-		const on = { step: (name, args) => onStep(stepLabel(name, args, cwd)), answer: t => { answer = t; }, error: m => { failure = m; } };
+		const on = { step: (name, args) => onStep(stepLabel(name, args, cwd)), answer: t => { answer = t; }, error: (m, a) => { failure = m; api = a; } };
 		createInterface({ input: child.stdout, crlfDelay: Infinity }).on('line', line => {
 			let f;
 			try { f = JSON.parse(line); } catch { return; }
@@ -159,7 +160,7 @@ export function runEnhance({ draft, messages = [], images = [], cwd, engine = 'o
 			else if (code === 0 && !err && !failure && out) resolve(out);
 			else if (code === 0 && !err && !failure) reject(new Error('The enhancer returned no text.'));
 			// OMP prints the error first and a "Run `omp …`" hint after it; skip warnings (e.g. MCP connect failures).
-			else reject(new Error(err?.message || failure || stderr.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '').split(/\r?\n/).map(l => l.trim()).find(l => l && !/^warning:/i.test(l)) || `${engine} exited (${code}).`));
+			else reject(Object.assign(new Error(err?.message || failure || stderr.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '').split(/\r?\n/).map(l => l.trim()).find(l => l && !/^warning:/i.test(l)) || `${engine} exited (${code}).`), !err && failure && api ? { api } : {}));
 		};
 		child.on('error', e => finish(null, e));
 		child.on('close', code => finish(code));

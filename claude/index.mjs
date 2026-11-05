@@ -8,7 +8,14 @@ import { pathToFileURL } from 'node:url';
 import { contentText, runEnhance } from '../core/enhance.mjs';
 
 export const MARKER = '::e';
-export const ENV = { claude: 'PROMPT_ENHANCER_CLAUDE', model: 'PROMPT_ENHANCER_MODEL', effort: 'PROMPT_ENHANCER_EFFORT' };
+export const ENV = { claude: 'PROMPT_ENHANCER_CLAUDE', model: 'PROMPT_ENHANCER_MODEL', effort: 'PROMPT_ENHANCER_EFFORT', token: 'PROMPT_ENHANCER_OAUTH_TOKEN' };
+
+// Claude Code withholds the session's sign-in (CLAUDE_CODE_OAUTH_TOKEN) from hooks, so `claude -p` signs in with the login
+// stored for that claude, which may be another account or organization than the session's (the desktop app's sessions run on its own).
+// PROMPT_ENHANCER_OAUTH_TOKEN (from `claude setup-token`) goes to the child as its sign-in.
+export function enhanceEnv(env = process.env) {
+	return env[ENV.token] ? { CLAUDE_CODE_OAUTH_TOKEN: env[ENV.token] } : {};
+}
 
 // The draft after the marker ('' when nothing follows it), or null when the prompt is not an enhance request.
 export function parseDraft(prompt) {
@@ -73,10 +80,17 @@ export function enhancedOutput(text, images = []) {
 	return block(missing.length ? `${text}\n\n${missing.map(i => `Image: ${i.file}`).join('\n')}` : text, false);
 }
 export const emptyOutput = () => block(`Write a prompt after ${MARKER} or /enhance first, e.g. \`${MARKER} fix the login redirect\`.`, true);
-export function failedOutput(e) {
+export function failedOutput(e, env = process.env) {
 	if (e?.name === 'AbortError') return block('Enhance cancelled.', true);
 	// spawn without a shell finds claude.exe but not an npm claude.cmd shim on Windows, and reports only `spawn claude ENOENT`.
-	const msg = /^spawn .+ ENOENT$/.test(e?.message) ? `claude not found. Set ${ENV.claude} to the claude executable.` : e?.message;
+	let msg = /^spawn .+ ENOENT$/.test(e?.message) ? `claude not found. Set ${ENV.claude} to the claude executable.` : e?.message;
+	// Claude Code words a refused sign-in as a billing problem (e.g. 403 oauth_not_allowed_for_organization), so say whose it was.
+	if (e?.api?.status === 401 || e?.api?.status === 403) {
+		const why = `(HTTP ${e.api.status}${e.api.code ? ` ${e.api.code}` : ''})`;
+		msg += env[ENV.token]
+			? `\n\nThe API refused ${ENV.token} ${why}. Make a new one with \`claude setup-token\`, signing in to the account and organization this session uses.`
+			: `\n\nThe API refused the sign-in of \`${env[ENV.claude] || 'claude'}\` ${why}. Hooks don't get this session's sign-in, so the enhancer uses that claude's own login, which may be another account or organization. Run \`claude setup-token\`, sign in to the account and organization this session uses, and set ${ENV.token} to the token (e.g. in the \`env\` of ~/.claude/settings.json); or sign that claude in to the same organization with \`claude auth login\`.`;
+	}
 	return block(`Enhance failed: ${msg}`, true);
 }
 
@@ -115,7 +129,7 @@ export async function main() {
 		try {
 			const cwd = input.cwd || process.cwd(), images = draftImages(draft, cwd);
 			out = enhancedOutput(await runEnhance({
-				draft, messages, images, cwd, engine: 'claude', bin: process.env[ENV.claude] || undefined,
+				draft, messages, images, cwd, engine: 'claude', bin: process.env[ENV.claude] || undefined, env: enhanceEnv(),
 				model: process.env[ENV.model] || model, thinking: process.env[ENV.effort] || undefined, signal: ctl.signal,
 			}), images);
 			if (copyToClipboard(out.reason)) out.reason = `Copied to the clipboard: paste it into the prompt box (Ctrl+V), edit it if you like, and send.\n\n${out.reason}`;

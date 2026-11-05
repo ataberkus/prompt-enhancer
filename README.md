@@ -40,7 +40,14 @@ Works in omp's terminal UI and in omp inside [Tern](https://stencil.so/tern).
   `::e` goes to Claude as written and `/enhance` only says the hook didn't run.
 - The enhancer gets the last 6 turns of the Claude Code conversation, read from the session transcript, and runs on the
   session's current model.
-- Each enhance is a separate `claude -p` run, billed to your Claude account like any other request.
+- Each enhance is a separate `claude -p` run, billed to your Claude account like any other request. Claude Code doesn't
+  give hooks the session's sign-in, so that run signs in as the `claude` on `PATH` is logged in (`claude auth status`), or
+  with `PROMPT_ENHANCER_OAUTH_TOKEN`. If that is another account or organization than the session's (common with the
+  Claude desktop app, whose sessions use the app's own sign-in), the API refuses it and Claude Code reports it as a billing
+  problem ("can't use your Claude subscription… payment is past due"); the `Enhance failed:` message then names the HTTP
+  error and this fix. Run `claude setup-token`, sign in to the account and organization the session uses, and put the token
+  in `PROMPT_ENHANCER_OAUTH_TOKEN`, e.g. `"env": { "PROMPT_ENHANCER_OAUTH_TOKEN": "sk-ant-oat01-…" }` in
+  `~/.claude/settings.json`; or run `claude auth login` and pick that organization.
 - To show the enhancer an image, write its file path in the draft: `::e match this layout shots/header.png`, `@shots/a.jpg`
   or `"C:\My shots\a.webp"` (quotes for a path with spaces), relative to the session's folder or absolute. PNG, JPEG, GIF
   and WebP files go to the enhancer with the draft; a path to no file stays plain text. The enhanced prompt keeps each path,
@@ -53,7 +60,7 @@ Settings, read from the environment Claude Code runs in:
 | :- | :- | :- |
 | `PROMPT_ENHANCER_CLAUDE` | `claude` on `PATH` | The claude executable. Set it on Windows if claude is only an npm `claude.cmd` shim, which can't be started without a shell. |
 | `PROMPT_ENHANCER_MODEL` | the session's model | Passed as `--model`, e.g. `sonnet`, `haiku` or a full model name. |
-| `PROMPT_ENHANCER_EFFORT` | Claude Code's default | Passed as `--effort`: `low`, `medium`, `high`, `xhigh` or `max`. |
+| `PROMPT_ENHANCER_OAUTH_TOKEN` | the `claude` CLI's own login | A Claude subscription token from `claude setup-token`, passed to `claude -p` as `CLAUDE_CODE_OAUTH_TOKEN`. Set it when that login isn't the session's account or organization. |
 
 ## How it works
 
@@ -64,7 +71,8 @@ Each enhance is one separate, locked-down agent run in the session's folder. It 
   (`core/guard.mjs`); every discovery provider, MCP, memory and other tools are off (`core/overlay.yml`).
 - **Claude Code** (`claude -p`): only `Read`, `Grep` and `Glob`, with the same rules enforced by a `PreToolUse` hook
   (`core/claude-guard.mjs`). No settings files are loaded (`--setting-sources ''`), so no user hooks, plugins or MCP
-  servers; no session is saved; `--permission-mode dontAsk` denies anything not allowed.
+  servers; no session is saved; `--permission-mode dontAsk` denies anything not allowed. It inherits the hook's environment
+  plus `CLAUDE_CODE_OAUTH_TOKEN` from `PROMPT_ENHANCER_OAUTH_TOKEN` when set; no settings file is needed to sign in.
 
 In omp it runs on an `enhance` model role if you configured one (`modelRoles.enhance` in `config.yml`). Otherwise it uses
 the session's model and thinking level. In Claude Code it uses `PROMPT_ENHANCER_MODEL`/`PROMPT_ENHANCER_EFFORT`, or the
