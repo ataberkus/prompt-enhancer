@@ -1,7 +1,8 @@
 // Prompt enhancer core: one read-only, locked-down agent run (`omp -p` or `claude -p`) that rewrites a draft into a
 // repo-grounded spec. Host-agnostic: omp/index.mjs and claude/index.mjs are front ends; others can call runEnhance the same way.
 // system.md, overlay.yml and guard.mjs come from omp-companion (companion/server.mjs ENHANCE_*); keep them in sync.
-// system-fast.md is this repo's own lean variant (`fast` mode). claude-guard.mjs is guard.mjs's rules for Claude Code's tools; keep the two in step.
+// system-fast.md and light-checks.md are this repo's own (`fast` and `notest` modes). claude-guard.mjs is guard.mjs's rules
+// for Claude Code's tools; keep the two in step.
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { readFileSync, rmSync } from 'node:fs';
@@ -14,27 +15,53 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 export const files = {
 	system: path.join(here, 'system.md'),
 	systemFast: path.join(here, 'system-fast.md'),
+	lightChecks: path.join(here, 'light-checks.md'),
 	overlay: path.join(here, 'overlay.yml'),
 	guard: path.join(here, 'guard.mjs'),
 	claudeGuard: path.join(here, 'claude-guard.mjs'),
 };
 
-// `full`: the complete spec (system.md, 12 lookups). `fast`: a lean prompt that keeps the agent to the repo's existing
-// automated checks, with no new tests and no smoke runs (system-fast.md, 6 lookups).
+// A checkout with core.autocrlf has CRLF prompt files; the swaps below match LF.
+const text = file => readFileSync(file, 'utf8').replace(/\r\n/g, '\n');
+// Replaces the literal passage `from` once. A passage that is gone (say, system.md re-synced with new wording) fails the
+// enhance instead of sending a prompt that still asks for tests.
+function swap(prompt, from, to) {
+	const i = prompt.indexOf(from);
+	if (i === -1) throw new Error(`Prompt passage not found: "${from.trim().slice(0, 60)}…"; update the mode swaps in core/enhance.mjs.`);
+	return prompt.slice(0, i) + to + prompt.slice(i + from.length);
+}
+const lightChecks = () => text(files.lightChecks).trimEnd();
+// system.md's Done when checks (they add tests) and its bug-fix regression check, which `notest` replaces.
+const FULL_CHECKS = [
+	'   - the repository\'s own checks pass: a test, build, typecheck or lint command you saw in its scripts, test files or docs. Add tests for the new behaviour where the repo already has a test setup; if it has none, the check is its build or a short script, and the agent does not set up a test framework;',
+	'   - the check runs in a few minutes without a person (never a manual browser, device or network-tab check). Tell the agent to run it before it finishes.',
+].join('\n');
+const FULL_REGRESSION = ', and include a regression check in Done when.';
+
+// Per mode: the system prompt text and the lookup limit.
+// `full`: the complete spec; its Done when adds tests (system.md, 12 lookups).
+// `notest`: the same spec and Inferred requirements, with the checks swapped for light-checks.md: the repo's existing
+// automated checks only, no new tests, no smoke runs (12 lookups).
+// `fast`: a lean prompt with the same light checks (system-fast.md, 6 lookups).
 export const modes = {
-	full: { system: files.system, lookups: 12 },
-	fast: { system: files.systemFast, lookups: 6 },
+	full: { lookups: 12, prompt: () => text(files.system) },
+	notest: {
+		lookups: 12,
+		prompt: () => swap(swap(text(files.system), FULL_CHECKS, lightChecks()), FULL_REGRESSION, '; Done when adds no new regression test unless the draft asks for one.'),
+	},
+	fast: { lookups: 6, prompt: () => swap(text(files.systemFast), '{{light-checks}}', lightChecks()) },
 };
 // guard.mjs runs inside the omp child, so it gets its lookup limit through the environment.
 export const LOOKUP_LIMIT_ENV = 'PROMPT_ENHANCER_LOOKUP_LIMIT';
 
 // The draft never goes in argv (stdin only): no quoting hazards and no Windows 32K command-line limit.
-// --system-prompt replaces OMP's coding-agent prompt; the overlay turns off every discovery provider and non-lookup tool;
-// the guard (-e loads even under --no-extensions) confines read/grep/glob to the repository and the mode's lookup limit.
+// --system-prompt replaces OMP's coding-agent prompt (omp takes a value with a newline as the text, not a file path); the
+// overlay turns off every discovery provider and non-lookup tool; the guard (-e loads even under --no-extensions) confines
+// read/grep/glob to the repository and the mode's lookup limit.
 export function ompArgs({ model, thinking, mode = 'full' } = {}) {
 	return ['-p', '--mode', 'json', '--no-session', '--no-title', '--no-skills', '--no-extensions', '--no-rules', '--no-lsp',
 		'--tools=read,grep,glob', '--approval-mode=always-ask', '--max-time=240', `--config=${files.overlay}`, '-e', files.guard,
-		...(model ? [`--model=${model}`] : []), ...(thinking ? [`--thinking=${thinking}`] : []), `--system-prompt=${modes[mode].system}`];
+		...(model ? [`--model=${model}`] : []), ...(thinking ? [`--thinking=${thinking}`] : []), `--system-prompt=${modes[mode].prompt()}`];
 }
 
 // --setting-sources '' loads no settings files, so no user hooks, plugins or MCP config; --strict-mcp-config drops the
@@ -42,12 +69,12 @@ export function ompArgs({ model, thinking, mode = 'full' } = {}) {
 // allows or denies each call, counting lookups in `lookups` against the mode's limit. dontAsk denies anything the guard leaves undecided.
 export function claudeArgs({ model, thinking, lookups, images = [], mode = 'full' } = {}) {
 	const q = p => `"${p.replace(/\\/g, '/')}"`; // forward slashes and double quotes work in both Git Bash and PowerShell
-	const { system, lookups: limit } = modes[mode];
+	const { prompt, lookups: limit } = modes[mode];
 	const settings = { hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: `node ${q(files.claudeGuard)} ${q(lookups)} ${limit}`, timeout: 30 }] }] } };
 	return ['-p', '--output-format', 'stream-json', '--verbose', '--no-session-persistence', '--setting-sources', '', '--strict-mcp-config',
 		'--disable-slash-commands', '--tools', 'Read,Grep,Glob', '--permission-mode', 'dontAsk', '--settings', JSON.stringify(settings),
 		...(images.length ? ['--input-format', 'stream-json'] : []),
-		...(model ? ['--model', model] : []), ...(thinking ? ['--effort', thinking] : []), '--system-prompt', readFileSync(system, 'utf8')];
+		...(model ? ['--model', model] : []), ...(thinking ? ['--effort', thinking] : []), '--system-prompt', prompt()];
 }
 
 const MEDIA = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp' };

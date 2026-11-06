@@ -28,13 +28,15 @@ test('transcriptMessages keeps only user and assistant chat text from a Claude C
 	]);
 });
 
-test('parseDraft takes the text after a leading ::e (full) or ::ef (fast) and ignores other prompts', () => {
+test('parseDraft takes the text after a leading ::e (full), ::en (notest) or ::ef (fast) and ignores other prompts', () => {
 	assert.deepEqual(parseDraft('::e fix the\nlogin bug '), { mode: 'full', draft: 'fix the\nlogin bug' });
 	assert.deepEqual(parseDraft('  ::e\n\nmultiline'), { mode: 'full', draft: 'multiline' });
 	assert.deepEqual(parseDraft('::e'), { mode: 'full', draft: '' });
 	assert.deepEqual(parseDraft('::e   \n'), { mode: 'full', draft: '' });
 	assert.deepEqual(parseDraft('::ef add a flag'), { mode: 'fast', draft: 'add a flag' });
 	assert.deepEqual(parseDraft('::ef'), { mode: 'fast', draft: '' });
+	assert.deepEqual(parseDraft('::en add a flag'), { mode: 'notest', draft: 'add a flag' });
+	assert.equal(parseDraft('::enable it'), null);
 	assert.equal(parseDraft('::eat this'), null);
 	assert.equal(parseDraft('::efx this'), null);
 	assert.equal(parseDraft('please ::e this'), null);
@@ -45,6 +47,7 @@ test('hookRequest picks the mode from the slash command, or from the marker on a
 	const expand = (name, args) => hookRequest({ hook_event_name: 'UserPromptExpansion', command_name: name, command_args: args });
 	assert.deepEqual(expand('prompt-enhancer:enhance', ' fix it '), { mode: 'full', draft: 'fix it' });
 	assert.deepEqual(expand('prompt-enhancer:enhance-fast', 'fix it'), { mode: 'fast', draft: 'fix it' });
+	assert.deepEqual(expand('prompt-enhancer:enhance-notest', 'fix it'), { mode: 'notest', draft: 'fix it' });
 	assert.deepEqual(expand('prompt-enhancer:enhance-fast'), { mode: 'fast', draft: '' });
 	assert.deepEqual(hookRequest({ hook_event_name: 'UserPromptSubmit', prompt: '::ef fix it' }), { mode: 'fast', draft: 'fix it' });
 	assert.equal(hookRequest({ hook_event_name: 'UserPromptSubmit', prompt: 'fix it' }), null);

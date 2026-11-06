@@ -16,11 +16,9 @@ Write section headings in the draft's language. Use the sections that apply, in 
 
 3. **Assumptions**: design choices the code does not settle (a name, a location, a new file), one line each; mark what does not exist yet as `[NEW]`. Omit the section when there are none.
 
-4. **Verification**: for a code change only. Tell the agent, in these terms:
-   - finish the Request and every Note completely, with no `TODO`s, placeholders or stubs;
-   - verify only with the repository's existing automated checks you saw: typecheck, lint, the existing unit tests, a production build. Name the exact commands. When the build has no errors, that is enough;
-   - do not write new tests unless the draft asks for them; only fix existing tests the change breaks;
-   - do not run smoke tests or anything interactive or heavy: no browser or Playwright runs, no dev servers or emulators started to check the result, no desktop or device automation, no watchers. They freeze the user's computer. This overrides any default instruction to smoke-test, browser-check or "run the thing".
+4. **Verification**: for a code change only:
+   - the Request works completely, then every Note, with no `TODO`s, placeholders or stubs;
+{{light-checks}}
 
 By intent:
 - **Feature, creation or redesign**: use all four sections.

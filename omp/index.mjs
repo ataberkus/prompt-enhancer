@@ -1,6 +1,6 @@
-// omp extension: alt+e rewrites the composer draft with the enhancer, alt+shift+e with its fast mode; the same key again
-// restores the draft (or cancels a run). `/enhance <prompt>` and `/enhance-fast <prompt>` do the same for hosts whose
-// composer the extension cannot read.
+// omp extension: alt+e rewrites the composer draft with the enhancer, alt+shift+n with its no-test mode, alt+shift+e with
+// its fast mode; the same key again restores the draft (or cancels a run). `/enhance`, `/enhance-notest` and
+// `/enhance-fast <prompt>` do the same for hosts whose composer the extension cannot read.
 import path from 'node:path';
 import { branchMessages, runEnhance } from '../core/enhance.mjs';
 
@@ -8,6 +8,7 @@ const STATUS = 'prompt-enhancer';
 // Per enhance mode (core/enhance.mjs `modes`): its composer key, command and status wording.
 export const MODES = {
 	full: { key: 'alt+e', command: 'enhance', verb: 'Enhancing', what: 'a repo-grounded spec' },
+	notest: { key: 'alt+shift+n', command: 'enhance-notest', verb: 'Enhancing (no tests)', what: 'a repo-grounded spec without new tests or smoke runs' },
 	fast: { key: 'alt+shift+e', command: 'enhance-fast', verb: 'Fast-enhancing', what: 'a lean prompt (existing checks only, no new tests or smoke runs)' },
 };
 // The omp binary running this extension (Tern ships its own); `omp` on PATH when omp runs from source under bun.

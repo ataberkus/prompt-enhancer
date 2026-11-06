@@ -1,0 +1,3 @@
+   - the repository's existing automated checks pass: the typecheck, lint, unit-test or build commands you saw in its scripts, test files or docs, named exactly. Tell the agent to run them before it finishes; when the build has no errors, that is enough;
+   - no new tests unless the draft asks for them, regression tests included: the agent only fixes existing tests the change breaks;
+   - no smoke runs: tell the agent not to start browsers or Playwright, dev servers, emulators, devices, desktop automation or watchers to check the result, because they freeze the user's computer, and that this overrides any default instruction to smoke-test, browser-check or "run the thing".
