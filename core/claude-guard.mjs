@@ -1,11 +1,12 @@
 // PreToolUse hook for the `claude -p` engine: the Claude Code counterpart of guard.mjs, same rules. Read, Grep and Glob
-// only, inside the repository, no .env files, at most 12 lookups. argv[2] is the file that counts this run's lookups.
+// only, inside the repository, no .env files, at most `limit` lookups (12 by default). argv[2] is the file that counts this
+// run's lookups, argv[3] the limit.
 // Every call gets an explicit allow or deny, and anything unexpected denies.
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-const LIMIT = 12, ALLOWED = new Set(['Read', 'Grep', 'Glob']);
+const ALLOWED = new Set(['Read', 'Grep', 'Glob']);
 const OUTSIDE = 'Enhance guard: only paths inside this repository can be looked up; keep the reference as the user wrote it.';
 const SECRET = /^\.env(?:\.(?!example$|sample$|template$|dist$)[^\\/]*)?$/i;
 
@@ -29,11 +30,11 @@ export function refuse(tool, input, root) {
 }
 
 // Counts the call in `counter` (one byte per lookup) and returns the PreToolUse decision.
-export function decide(hookInput, counter) {
+export function decide(hookInput, counter, limit = 12) {
 	let why;
 	try {
 		fs.appendFileSync(counter, '.');
-		why = fs.statSync(counter).size > LIMIT ? 'Enhance guard: the lookup limit is used up; write the prompt with what you found.'
+		why = fs.statSync(counter).size > limit ? 'Enhance guard: the lookup limit is used up; write the prompt with what you found.'
 			: refuse(hookInput.tool_name, hookInput.tool_input || {}, real(path.resolve(hookInput.cwd || process.cwd())));
 	} catch (e) {
 		why = `Enhance guard: ${e.message}`;
@@ -46,5 +47,5 @@ if (process.argv[1] && import.meta.url === pathToFileURL(fs.realpathSync(process
 	for await (const chunk of process.stdin) raw += chunk;
 	let input = null;
 	try { input = JSON.parse(raw); } catch {}
-	process.stdout.write(JSON.stringify(input ? decide(input, process.argv[2]) : { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: 'Enhance guard: unreadable hook input.' } }));
+	process.stdout.write(JSON.stringify(input ? decide(input, process.argv[2], Number(process.argv[3]) || undefined) : { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: 'Enhance guard: unreadable hook input.' } }));
 }

@@ -1,7 +1,7 @@
 {
 	"name": "prompt-enhancer",
-	"version": "0.2.2",
-	"description": "Rewrites a coding-agent prompt into a repo-grounded spec. omp extension (alt+e, /enhance) and Claude Code plugin (::e prompt prefix or /enhance, no omp needed).",
+	"version": "0.3.0",
+	"description": "Rewrites a coding-agent prompt into a repo-grounded spec. omp extension (alt+e, /enhance; fast mode: alt+shift+e, /enhance-fast) and Claude Code plugin (::e or /enhance; fast mode: ::ef or /enhance-fast; no omp needed).",
 	"type": "module",
 	"private": true,
 	"keywords": ["omp-plugin", "oh-my-pi", "claude-code", "claude-code-plugin", "prompt"],

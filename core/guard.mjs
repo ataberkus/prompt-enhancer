@@ -1,6 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-const LIMIT = 12, ALLOWED = new Set(['read', 'grep', 'glob']);
+const LIMIT = Number(process.env.PROMPT_ENHANCER_LOOKUP_LIMIT) || 12, ALLOWED = new Set(['read', 'grep', 'glob']);
 const OUTSIDE = 'Enhance guard: only paths inside this repository can be looked up; keep the reference as the user wrote it.';
 const SECRET = /^\.env(?:\.(?!example$|sample$|template$|dist$)[^\\/]*)?$/i;
 function real(p) {

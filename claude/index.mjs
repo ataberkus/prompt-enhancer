@@ -1,13 +1,14 @@
-// Claude Code front end: a UserPromptSubmit and a UserPromptExpansion hook (hooks/hooks.json). A prompt starting with `::e`,
-// or `/enhance <draft>`, never reaches Claude; a separate locked-down `claude -p` run rewrites the draft, and the hook blocks
-// the submit with the enhanced prompt as its message, also copied to the clipboard. Needs only Claude Code and node; no omp.
+// Claude Code front end: a UserPromptSubmit and a UserPromptExpansion hook (hooks/hooks.json). A prompt starting with `::e`
+// (`::ef` for the fast mode), or `/enhance <draft>` (`/enhance-fast <draft>`), never reaches Claude; a separate locked-down
+// `claude -p` run rewrites the draft, and the hook blocks the submit with the enhanced prompt as its message, also copied to
+// the clipboard. Needs only Claude Code and node; no omp.
 import { spawnSync } from 'node:child_process';
 import { readFileSync, realpathSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { contentText, runEnhance } from '../core/enhance.mjs';
 
-export const MARKER = '::e';
+export const MARKER = '::e', FAST_MARKER = '::ef';
 export const ENV = { claude: 'PROMPT_ENHANCER_CLAUDE', model: 'PROMPT_ENHANCER_MODEL', effort: 'PROMPT_ENHANCER_EFFORT', token: 'PROMPT_ENHANCER_OAUTH_TOKEN' };
 
 // Claude Code withholds the session's sign-in (CLAUDE_CODE_OAUTH_TOKEN) from hooks, so `claude -p` signs in with the login
@@ -17,10 +18,17 @@ export function enhanceEnv(env = process.env) {
 	return env[ENV.token] ? { CLAUDE_CODE_OAUTH_TOKEN: env[ENV.token] } : {};
 }
 
-// The draft after the marker ('' when nothing follows it), or null when the prompt is not an enhance request.
+// → { mode, draft } with the draft after the marker ('' when nothing follows it), or null when the prompt is not an enhance request.
 export function parseDraft(prompt) {
-	const m = String(prompt ?? '').match(/^\s*::e(?:\s+([\s\S]*))?$/);
-	return m ? (m[1] ?? '').trim() : null;
+	const m = String(prompt ?? '').match(/^\s*::e(f)?(?:\s+([\s\S]*))?$/);
+	return m ? { mode: m[1] ? 'fast' : 'full', draft: (m[2] ?? '').trim() } : null;
+}
+
+// The enhance request in a hook payload, or null. `/enhance <draft>` and `/enhance-fast <draft>` arrive as UserPromptExpansion
+// (hooks.json matches only those commands, as `prompt-enhancer:enhance[-fast]`); `::e <draft>` and `::ef <draft>` as UserPromptSubmit.
+export function hookRequest(input) {
+	if (input?.hook_event_name !== 'UserPromptExpansion') return parseDraft(input?.prompt);
+	return { mode: /enhance-fast$/.test(String(input.command_name ?? '')) ? 'fast' : 'full', draft: String(input.command_args ?? '').trim() };
 }
 
 // Images are file paths written in the draft (`shot.png`, `@shots/a.jpg`, `"C:\My shots\a.webp"`), relative to the session's
@@ -79,7 +87,7 @@ export function enhancedOutput(text, images = []) {
 	const missing = images.filter(i => !text.includes(i.label) && !text.includes(i.file));
 	return block(missing.length ? `${text}\n\n${missing.map(i => `Image: ${i.file}`).join('\n')}` : text, false);
 }
-export const emptyOutput = () => block(`Write a prompt after ${MARKER} or /enhance first, e.g. \`${MARKER} fix the login redirect\`.`, true);
+export const emptyOutput = () => block(`Write a prompt after ${MARKER} (${FAST_MARKER} for the fast mode) or /enhance (/enhance-fast) first, e.g. \`${MARKER} fix the login redirect\`.`, true);
 export function failedOutput(e, env = process.env) {
 	if (e?.name === 'AbortError') return block('Enhance cancelled.', true);
 	// spawn without a shell finds claude.exe but not an npm claude.cmd shim on Windows, and reports only `spawn claude ENOENT`.
@@ -110,10 +118,9 @@ export async function main() {
 		for await (const chunk of process.stdin) raw += chunk;
 		input = JSON.parse(raw);
 	} catch { return; } // not a hook payload: let the prompt through untouched
-	// `/enhance <draft>` arrives as UserPromptExpansion (hooks.json matches only that command); `::e <draft>` as UserPromptSubmit.
-	const expansion = input?.hook_event_name === 'UserPromptExpansion';
-	const draft = expansion ? String(input.command_args ?? '').trim() : parseDraft(input?.prompt);
-	if (draft === null) return;
+	const req = hookRequest(input);
+	if (!req) return;
+	const { mode, draft } = req;
 
 	let out;
 	if (!draft) out = emptyOutput();
@@ -129,7 +136,7 @@ export async function main() {
 		try {
 			const cwd = input.cwd || process.cwd(), images = draftImages(draft, cwd);
 			out = enhancedOutput(await runEnhance({
-				draft, messages, images, cwd, engine: 'claude', bin: process.env[ENV.claude] || undefined, env: enhanceEnv(),
+				draft, messages, images, cwd, engine: 'claude', mode, bin: process.env[ENV.claude] || undefined, env: enhanceEnv(),
 				model: process.env[ENV.model] || model, thinking: process.env[ENV.effort] || undefined, signal: ctl.signal,
 			}), images);
 			if (copyToClipboard(out.reason)) out.reason = `Copied to the clipboard: paste it into the prompt box (Ctrl+V), edit it if you like, and send.\n\n${out.reason}`;
@@ -137,7 +144,7 @@ export async function main() {
 			out = failedOutput(e);
 		}
 	}
-	if (expansion) out.hookSpecificOutput.hookEventName = 'UserPromptExpansion';
+	if (input.hook_event_name === 'UserPromptExpansion') out.hookSpecificOutput.hookEventName = 'UserPromptExpansion';
 	// Exit 2 blocks on every Claude Code version, even one that rejects the JSON; stderr is then the message shown.
 	process.stdout.write(JSON.stringify(out));
 	process.stderr.write(out.reason);

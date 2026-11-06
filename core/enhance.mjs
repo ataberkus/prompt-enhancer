@@ -1,7 +1,7 @@
 // Prompt enhancer core: one read-only, locked-down agent run (`omp -p` or `claude -p`) that rewrites a draft into a
 // repo-grounded spec. Host-agnostic: omp/index.mjs and claude/index.mjs are front ends; others can call runEnhance the same way.
 // system.md, overlay.yml and guard.mjs come from omp-companion (companion/server.mjs ENHANCE_*); keep them in sync.
-// claude-guard.mjs is guard.mjs's rules for Claude Code's tools; keep the two in step.
+// system-fast.md is this repo's own lean variant (`fast` mode). claude-guard.mjs is guard.mjs's rules for Claude Code's tools; keep the two in step.
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { readFileSync, rmSync } from 'node:fs';
@@ -13,30 +13,41 @@ import path from 'node:path';
 const here = path.dirname(fileURLToPath(import.meta.url));
 export const files = {
 	system: path.join(here, 'system.md'),
+	systemFast: path.join(here, 'system-fast.md'),
 	overlay: path.join(here, 'overlay.yml'),
 	guard: path.join(here, 'guard.mjs'),
 	claudeGuard: path.join(here, 'claude-guard.mjs'),
 };
 
+// `full`: the complete spec (system.md, 12 lookups). `fast`: a lean prompt that keeps the agent to the repo's existing
+// automated checks, with no new tests and no smoke runs (system-fast.md, 6 lookups).
+export const modes = {
+	full: { system: files.system, lookups: 12 },
+	fast: { system: files.systemFast, lookups: 6 },
+};
+// guard.mjs runs inside the omp child, so it gets its lookup limit through the environment.
+export const LOOKUP_LIMIT_ENV = 'PROMPT_ENHANCER_LOOKUP_LIMIT';
+
 // The draft never goes in argv (stdin only): no quoting hazards and no Windows 32K command-line limit.
 // --system-prompt replaces OMP's coding-agent prompt; the overlay turns off every discovery provider and non-lookup tool;
-// the guard (-e loads even under --no-extensions) confines read/grep/glob to the repository and 12 lookups.
-export function ompArgs({ model, thinking } = {}) {
+// the guard (-e loads even under --no-extensions) confines read/grep/glob to the repository and the mode's lookup limit.
+export function ompArgs({ model, thinking, mode = 'full' } = {}) {
 	return ['-p', '--mode', 'json', '--no-session', '--no-title', '--no-skills', '--no-extensions', '--no-rules', '--no-lsp',
 		'--tools=read,grep,glob', '--approval-mode=always-ask', '--max-time=240', `--config=${files.overlay}`, '-e', files.guard,
-		...(model ? [`--model=${model}`] : []), ...(thinking ? [`--thinking=${thinking}`] : []), `--system-prompt=${files.system}`];
+		...(model ? [`--model=${model}`] : []), ...(thinking ? [`--thinking=${thinking}`] : []), `--system-prompt=${modes[mode].system}`];
 }
 
 // --setting-sources '' loads no settings files, so no user hooks, plugins or MCP config; --strict-mcp-config drops the
 // rest of MCP. Only Read/Grep/Glob exist, and claude-guard.mjs (a PreToolUse hook from --settings, which still loads)
-// allows or denies each call, counting lookups in `lookups`. dontAsk denies anything the guard leaves undecided.
-export function claudeArgs({ model, thinking, lookups, images = [] } = {}) {
+// allows or denies each call, counting lookups in `lookups` against the mode's limit. dontAsk denies anything the guard leaves undecided.
+export function claudeArgs({ model, thinking, lookups, images = [], mode = 'full' } = {}) {
 	const q = p => `"${p.replace(/\\/g, '/')}"`; // forward slashes and double quotes work in both Git Bash and PowerShell
-	const settings = { hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: `node ${q(files.claudeGuard)} ${q(lookups)}`, timeout: 30 }] }] } };
+	const { system, lookups: limit } = modes[mode];
+	const settings = { hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: `node ${q(files.claudeGuard)} ${q(lookups)} ${limit}`, timeout: 30 }] }] } };
 	return ['-p', '--output-format', 'stream-json', '--verbose', '--no-session-persistence', '--setting-sources', '', '--strict-mcp-config',
 		'--disable-slash-commands', '--tools', 'Read,Grep,Glob', '--permission-mode', 'dontAsk', '--settings', JSON.stringify(settings),
 		...(images.length ? ['--input-format', 'stream-json'] : []),
-		...(model ? ['--model', model] : []), ...(thinking ? ['--effort', thinking] : []), '--system-prompt', readFileSync(files.system, 'utf8')];
+		...(model ? ['--model', model] : []), ...(thinking ? ['--effort', thinking] : []), '--system-prompt', readFileSync(system, 'utf8')];
 }
 
 const MEDIA = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp' };
@@ -123,16 +134,19 @@ export function cleanEnhanced(text) {
 }
 
 // Resolves with the enhanced prompt; rejects with an Error (name 'AbortError' when `signal` aborted it; `api` = { status, code }
-// when the API refused the run). `engine` is a key of `engines`; `bin` overrides its binary; `env` is added to the child's environment.
-export function runEnhance({ draft, messages = [], images = [], cwd, engine = 'omp', bin, env, model, thinking, signal, onStep = () => {} }) {
+// when the API refused the run). `engine` is a key of `engines`, `mode` a key of `modes`; `bin` overrides its binary; `env` is
+// added to the child's environment.
+export function runEnhance({ draft, messages = [], images = [], cwd, engine = 'omp', mode = 'full', bin, env, model, thinking, signal, onStep = () => {} }) {
 	return new Promise((resolve, reject) => {
 		const eng = engines[engine];
 		if (!eng) throw new Error(`Unknown enhance engine: ${engine}`);
+		if (!modes[mode]) throw new Error(`Unknown enhance mode: ${mode}`);
 		if (images.length && !eng.input) throw new Error(`The ${engine} engine takes no images.`);
 		const stdin = eng.input ? eng.input(enhanceInput(draft, messages), images) : enhanceInput(draft, messages);
 		const lookups = path.join(os.tmpdir(), `prompt-enhancer-${randomUUID()}.lookups`);
-		const child = spawn(bin || eng.bin, eng.args({ model, thinking, lookups, images }), {
-			cwd, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, env: { ...process.env, ...env, NO_COLOR: '1', FORCE_COLOR: '0' },
+		const child = spawn(bin || eng.bin, eng.args({ model, thinking, lookups, images, mode }), {
+			cwd, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true,
+			env: { ...process.env, ...env, NO_COLOR: '1', FORCE_COLOR: '0', [LOOKUP_LIMIT_ENV]: String(modes[mode].lookups) },
 		});
 		let stderr = '', answer = '', failure = '', api, timedOut = false, done = false;
 		const kill = () => child.kill();

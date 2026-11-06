@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { draftImages, emptyOutput, enhanceEnv, enhancedOutput, failedOutput, parseDraft, transcriptMessages, transcriptModel } from '../claude/index.mjs';
+import { draftImages, emptyOutput, enhanceEnv, enhancedOutput, failedOutput, hookRequest, parseDraft, transcriptMessages, transcriptModel } from '../claude/index.mjs';
 import { decide, refuse } from '../core/claude-guard.mjs';
 import { claudeArgs, claudeInput, engines } from '../core/enhance.mjs';
 
@@ -28,14 +28,26 @@ test('transcriptMessages keeps only user and assistant chat text from a Claude C
 	]);
 });
 
-test('parseDraft takes the text after a leading ::e and ignores other prompts', () => {
-	assert.equal(parseDraft('::e fix the\nlogin bug '), 'fix the\nlogin bug');
-	assert.equal(parseDraft('  ::e\n\nmultiline'), 'multiline');
-	assert.equal(parseDraft('::e'), '');
-	assert.equal(parseDraft('::e   \n'), '');
+test('parseDraft takes the text after a leading ::e (full) or ::ef (fast) and ignores other prompts', () => {
+	assert.deepEqual(parseDraft('::e fix the\nlogin bug '), { mode: 'full', draft: 'fix the\nlogin bug' });
+	assert.deepEqual(parseDraft('  ::e\n\nmultiline'), { mode: 'full', draft: 'multiline' });
+	assert.deepEqual(parseDraft('::e'), { mode: 'full', draft: '' });
+	assert.deepEqual(parseDraft('::e   \n'), { mode: 'full', draft: '' });
+	assert.deepEqual(parseDraft('::ef add a flag'), { mode: 'fast', draft: 'add a flag' });
+	assert.deepEqual(parseDraft('::ef'), { mode: 'fast', draft: '' });
 	assert.equal(parseDraft('::eat this'), null);
+	assert.equal(parseDraft('::efx this'), null);
 	assert.equal(parseDraft('please ::e this'), null);
 	assert.equal(parseDraft(undefined), null);
+});
+
+test('hookRequest picks the mode from the slash command, or from the marker on a submit', () => {
+	const expand = (name, args) => hookRequest({ hook_event_name: 'UserPromptExpansion', command_name: name, command_args: args });
+	assert.deepEqual(expand('prompt-enhancer:enhance', ' fix it '), { mode: 'full', draft: 'fix it' });
+	assert.deepEqual(expand('prompt-enhancer:enhance-fast', 'fix it'), { mode: 'fast', draft: 'fix it' });
+	assert.deepEqual(expand('prompt-enhancer:enhance-fast'), { mode: 'fast', draft: '' });
+	assert.deepEqual(hookRequest({ hook_event_name: 'UserPromptSubmit', prompt: '::ef fix it' }), { mode: 'fast', draft: 'fix it' });
+	assert.equal(hookRequest({ hook_event_name: 'UserPromptSubmit', prompt: 'fix it' }), null);
 });
 
 test('hook outputs always block; only a success hides the draft', () => {
@@ -131,10 +143,12 @@ test('claude guard allows repository lookups only', () => {
 	assert.match(refuse('Read', { file_path: 'https://example.com' }, root), /only paths inside/);
 });
 
-test('claude guard denies every lookup after the 12th', t => {
-	const counter = path.join(os.tmpdir(), `prompt-enhancer-test-${process.pid}.lookups`);
-	t.after(() => fs.rmSync(counter, { force: true }));
-	const call = () => decide({ tool_name: 'Glob', tool_input: { pattern: '*' }, cwd: process.cwd() }, counter).hookSpecificOutput;
-	for (let i = 0; i < 12; i++) assert.equal(call().permissionDecision, 'allow');
-	assert.deepEqual([call().permissionDecision, call().permissionDecisionReason], ['deny', 'Enhance guard: the lookup limit is used up; write the prompt with what you found.']);
+test('claude guard denies every lookup after the limit: 12 by default, the fast mode\'s 6 when given', t => {
+	for (const [limit, args] of [[12, []], [6, [6]]]) {
+		const counter = path.join(os.tmpdir(), `prompt-enhancer-test-${process.pid}-${limit}.lookups`);
+		t.after(() => fs.rmSync(counter, { force: true }));
+		const call = () => decide({ tool_name: 'Glob', tool_input: { pattern: '*' }, cwd: process.cwd() }, counter, ...args).hookSpecificOutput;
+		for (let i = 0; i < limit; i++) assert.equal(call().permissionDecision, 'allow');
+		assert.deepEqual([call().permissionDecision, call().permissionDecisionReason], ['deny', 'Enhance guard: the lookup limit is used up; write the prompt with what you found.']);
+	}
 });

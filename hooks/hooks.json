@@ -7,20 +7,20 @@
 						"type": "command",
 						"command": "node \"${CLAUDE_PLUGIN_ROOT}/claude/index.mjs\"",
 						"timeout": 300,
-						"statusMessage": "✨ Enhancing prompt (::e)…"
+						"statusMessage": "✨ Enhancing prompt (::e / ::ef)…"
 					}
 				]
 			}
 		],
 		"UserPromptExpansion": [
 			{
-				"matcher": "prompt-enhancer:enhance",
+				"matcher": "^prompt-enhancer:enhance(-fast)?$",
 				"hooks": [
 					{
 						"type": "command",
 						"command": "node \"${CLAUDE_PLUGIN_ROOT}/claude/index.mjs\"",
 						"timeout": 300,
-						"statusMessage": "✨ Enhancing prompt (/enhance)…"
+						"statusMessage": "✨ Enhancing prompt (/enhance or /enhance-fast)…"
 					}
 				]
 			}

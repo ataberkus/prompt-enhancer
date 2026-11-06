@@ -5,6 +5,20 @@ Turns a short coding-agent prompt into a complete, repo-grounded spec before you
 [Claude Code](https://code.claude.com) plugin. Each host runs the enhancer with its own CLI: omp with `omp -p`, Claude Code
 with `claude -p`. The Claude Code plugin does not need omp.
 
+## Fast mode
+
+The standard enhance writes a complete spec, and its "Done when" asks the agent to add tests for the new behaviour and run
+the repo's checks. The fast mode (`core/system-fast.md`) writes a shorter prompt from at most 6 lookups (instead of 12):
+the request, at most 5 notes tied to code it read, assumptions, and a **Verification** section that tells the agent to
+
+- check only with the repo's existing typecheck, lint, unit tests and production build (a clean build is enough);
+- not write new tests unless your draft asks for them, only fix existing ones the change breaks;
+- not run smoke tests or anything heavy: no browser or Playwright runs, dev servers, emulators, desktop automation or
+  watchers, overriding the agent's own default to smoke-test.
+
+Start it with **Alt+Shift+E** or `/enhance-fast <prompt>` in omp, and with `::ef <prompt>` or `/enhance-fast <prompt>`
+in Claude Code. Everything else (restore, cancel, images, clipboard, settings) works as below.
+
 ## Use
 
 ### omp
@@ -16,6 +30,7 @@ with `claude -p`. The Claude Code plugin does not need omp.
 - **Alt+E** again, before you edit the result: puts your original draft back.
 - **Alt+E** while it runs: cancels.
 - `/enhance <prompt>`: same thing for a prompt you type after the command.
+- **Alt+Shift+E** / `/enhance-fast <prompt>`: the [fast mode](#fast-mode); its key again restores or cancels the same way.
 
 If you change the composer while an enhance is running, you're asked before your text is replaced.
 
@@ -36,6 +51,7 @@ Works in omp's terminal UI and in omp inside [Tern](https://stencil.so/tern).
 - If the enhance fails or is cancelled, the message says so (`Enhance failed: …` / `Enhance cancelled.`) and shows your
   draft. Nothing is sent to Claude.
 - `::e` or `/enhance` with nothing after it only shows a reminder.
+- `::ef <prompt>` or `/enhance-fast <prompt>` (`/prompt-enhancer:enhance-fast`) runs the [fast mode](#fast-mode).
 - Cloud sessions (an environment other than this computer) don't load locally installed plugins, so neither works there:
   `::e` goes to Claude as written and `/enhance` only says the hook didn't run.
 - The enhancer gets the last 6 turns of the Claude Code conversation, read from the session transcript, and runs on the
@@ -65,9 +81,10 @@ Settings, read from the environment Claude Code runs in:
 ## How it works
 
 Each enhance is one separate, locked-down agent run in the session's folder. It uses the system prompt in
-`core/system.md`, gets your draft and the last 6 turns of the conversation on stdin, and writes nothing.
+`core/system.md` (`core/system-fast.md` in fast mode), gets your draft and the last 6 turns of the conversation on stdin,
+and writes nothing.
 
-- **omp** (`omp -p`): only `read`, `grep` and `glob`, inside the repository, at most 12 lookups and no `.env` files
+- **omp** (`omp -p`): only `read`, `grep` and `glob`, inside the repository, at most 12 lookups (6 in fast mode) and no `.env` files
   (`core/guard.mjs`); every discovery provider, MCP, memory and other tools are off (`core/overlay.yml`).
 - **Claude Code** (`claude -p`): only `Read`, `Grep` and `Glob`, with the same rules enforced by a `PreToolUse` hook
   (`core/claude-guard.mjs`). No settings files are loaded (`--setting-sources ''`), so no user hooks, plugins or MCP
@@ -78,9 +95,9 @@ In omp it runs on an `enhance` model role if you configured one (`modelRoles.enh
 the session's model and thinking level. In Claude Code it uses `PROMPT_ENHANCER_MODEL`/`PROMPT_ENHANCER_EFFORT`, or the
 session's model and Claude Code's default effort.
 
-`core/enhance.mjs` has no host-specific code: `runEnhance({ engine: 'omp' | 'claude', … })`. `omp/index.mjs` (omp extension)
-and `claude/index.mjs` (Claude Code `UserPromptSubmit` and `UserPromptExpansion` hook, wired up in `hooks/hooks.json`;
-`commands/enhance.md` defines `/enhance`) are thin front ends over it.
+`core/enhance.mjs` has no host-specific code: `runEnhance({ engine: 'omp' | 'claude', mode: 'full' | 'fast', … })`. `omp/index.mjs`
+(omp extension) and `claude/index.mjs` (Claude Code `UserPromptSubmit` and `UserPromptExpansion` hook, wired up in
+`hooks/hooks.json`; `commands/enhance.md` and `commands/enhance-fast.md` define the slash commands) are thin front ends over it.
 
 ## Install
 
@@ -109,9 +126,8 @@ claude plugin marketplace add /path/to/prompt-enhancer
 claude plugin install prompt-enhancer@prompt-enhancer
 ```
 
-The `::e` hook runs on every prompt you submit but exits at once unless the prompt starts with `::e`; the `/enhance` hook
-runs only for that command. Their timeout is 300 s,
-above the enhancer's own 270 s limit.
+The `::e` hook runs on every prompt you submit but exits at once unless the prompt starts with `::e` or `::ef`; the
+`/enhance` hook runs only for `/enhance` and `/enhance-fast`. Their timeout is 300 s, above the enhancer's own 270 s limit.
 
 ## Develop
 
@@ -121,4 +137,6 @@ npm test
 
 `core/system.md`, `core/overlay.yml` and `core/guard.mjs` were copied from omp-companion's `companion/server.mjs`
 (`ENHANCE_SYSTEM`, `ENHANCE_OVERLAY`, `ENHANCE_GUARD`) at commit `fba8f5a`. Change them in both places, or the two drift
-apart. `core/claude-guard.mjs` applies `core/guard.mjs`'s rules to Claude Code's tools; keep the two in step.
+apart; the one local change is `guard.mjs` reading its lookup limit from `PROMPT_ENHANCER_LOOKUP_LIMIT` (set per mode by
+`runEnhance`). `core/system-fast.md` exists only here. `core/claude-guard.mjs` applies `core/guard.mjs`'s rules to Claude
+Code's tools (its limit is the hook command's third argument); keep the two in step.

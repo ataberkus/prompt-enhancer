@@ -1,9 +1,15 @@
-// omp extension: alt+e rewrites the composer draft with the enhancer; alt+e again restores the draft (or cancels a run).
-// `/enhance <prompt>` does the same for hosts whose composer the extension cannot read.
+// omp extension: alt+e rewrites the composer draft with the enhancer, alt+shift+e with its fast mode; the same key again
+// restores the draft (or cancels a run). `/enhance <prompt>` and `/enhance-fast <prompt>` do the same for hosts whose
+// composer the extension cannot read.
 import path from 'node:path';
 import { branchMessages, runEnhance } from '../core/enhance.mjs';
 
-const KEY = 'alt+e', STATUS = 'prompt-enhancer';
+const STATUS = 'prompt-enhancer';
+// Per enhance mode (core/enhance.mjs `modes`): its composer key, command and status wording.
+export const MODES = {
+	full: { key: 'alt+e', command: 'enhance', verb: 'Enhancing', what: 'a repo-grounded spec' },
+	fast: { key: 'alt+shift+e', command: 'enhance-fast', verb: 'Fast-enhancing', what: 'a lean prompt (existing checks only, no new tests or smoke runs)' },
+};
 // The omp binary running this extension (Tern ships its own); `omp` on PATH when omp runs from source under bun.
 const OMP = /^omp(\.exe)?$/i.test(path.basename(process.execPath)) ? process.execPath : 'omp';
 
@@ -45,23 +51,24 @@ export default function promptEnhancer(pi) {
 		return m ? { model: `${m.provider}/${m.id}`, thinking: pi.getThinkingLevel() ?? null, label: m.id } : { model: null, thinking: null, label: 'omp default' };
 	};
 
-	async function enhance(ctx, draft) {
-		if (!draft.trim()) return ctx.ui.notify(`Write a prompt first, then press ${KEY} (or run /enhance <prompt>).`, 'warning');
+	async function enhance(ctx, draft, mode) {
+		const M = MODES[mode];
+		if (!draft.trim()) return ctx.ui.notify(`Write a prompt first, then press ${M.key} (or run /${M.command} <prompt>).`, 'warning');
 		const ctl = new AbortController(), p = pick(ctx);
 		job = ctl;
-		ctx.ui.setStatus(STATUS, `✨ Enhancing with ${p.label}… (${KEY} cancels)`);
+		ctx.ui.setStatus(STATUS, `✨ ${M.verb} with ${p.label}… (${M.key} cancels)`);
 		try {
 			const att = draftAttachments(draft, chipIcons(ctx.ui.theme));
 			const text = keepAttachments(await runEnhance({
-				draft: att.text, messages: branchMessages(ctx.sessionManager.getBranch()), cwd: ctx.cwd, bin: OMP, model: p.model, thinking: p.thinking,
-				signal: ctl.signal, onStep: s => ctx.ui.setStatus(STATUS, `✨ Enhancing: ${s}`),
+				draft: att.text, messages: branchMessages(ctx.sessionManager.getBranch()), cwd: ctx.cwd, bin: OMP, mode, model: p.model, thinking: p.thinking,
+				signal: ctl.signal, onStep: s => ctx.ui.setStatus(STATUS, `✨ ${M.verb}: ${s}`),
 			}), att.refs);
 			// Never drop words typed while the enhancer ran.
 			const now = ctx.ui.getEditorText();
 			if (now.trim() && now !== draft && !(await ctx.ui.confirm('Replace your prompt?', 'You changed the prompt while it was being enhanced. Replace it with the enhanced version?'))) return;
 			ctx.ui.setEditorText(text);
 			last = { draft, text };
-			ctx.ui.notify(`Prompt enhanced. Press ${KEY} to restore your draft.`, 'info');
+			ctx.ui.notify(`Prompt enhanced. Press ${M.key} to restore your draft.`, 'info');
 		} catch (e) {
 			ctx.ui.notify(e.name === 'AbortError' ? 'Enhance cancelled.' : `Enhance failed: ${e.message}`, e.name === 'AbortError' ? 'info' : 'error');
 		} finally {
@@ -70,30 +77,32 @@ export default function promptEnhancer(pi) {
 		}
 	}
 	// Detached on purpose so input stays live; enhance() catches its own errors, the catch covers a throwing UI call.
-	const start = (ctx, draft) => void enhance(ctx, draft).catch(() => {});
+	const start = (ctx, draft, mode) => void enhance(ctx, draft, mode).catch(() => {});
 
-	pi.registerShortcut(KEY, {
-		description: 'Enhance the prompt in the composer (again: restore it, or cancel a running enhance)',
-		handler: ctx => {
-			if (job) return job.abort();
-			if (!ctx.hasUI || !ctx.ui.supportsEditor) return ctx.ui.notify('This omp host has no editable composer; use /enhance <prompt>.', 'warning');
-			const text = ctx.ui.getEditorText();
-			if (last && text === last.text) {
-				ctx.ui.setEditorText(last.draft);
-				last = null;
-				return ctx.ui.notify('Restored your draft.', 'info');
-			}
-			start(ctx, text);
-		},
-	});
+	for (const [mode, M] of Object.entries(MODES)) {
+		pi.registerShortcut(M.key, {
+			description: `Enhance the prompt in the composer into ${M.what} (again: restore it, or cancel a running enhance)`,
+			handler: ctx => {
+				if (job) return job.abort();
+				if (!ctx.hasUI || !ctx.ui.supportsEditor) return ctx.ui.notify(`This omp host has no editable composer; use /${M.command} <prompt>.`, 'warning');
+				const text = ctx.ui.getEditorText();
+				if (last && text === last.text) {
+					ctx.ui.setEditorText(last.draft);
+					last = null;
+					return ctx.ui.notify('Restored your draft.', 'info');
+				}
+				start(ctx, text, mode);
+			},
+		});
 
-	pi.registerCommand('enhance', {
-		description: `Enhance a prompt into a repo-grounded spec: /enhance <prompt> (or ${KEY} on the composer)`,
-		handler: async (args, ctx) => {
-			if (job) return ctx.ui.notify(`An enhance is already running; ${KEY} cancels it.`, 'warning');
-			start(ctx, args.trim() ? args : ctx.ui.getEditorText());
-		},
-	});
+		pi.registerCommand(M.command, {
+			description: `Enhance a prompt into ${M.what}: /${M.command} <prompt> (or ${M.key} on the composer)`,
+			handler: async (args, ctx) => {
+				if (job) return ctx.ui.notify(`An enhance is already running; ${M.key} cancels it.`, 'warning');
+				start(ctx, args.trim() ? args : ctx.ui.getEditorText(), mode);
+			},
+		});
+	}
 
 	pi.on('session_shutdown', () => job?.abort());
 }
