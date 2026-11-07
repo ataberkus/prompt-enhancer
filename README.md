@@ -2,8 +2,8 @@
 
 Turns a short coding-agent prompt into a complete, repo-grounded spec before you send it. It's the ✨ Enhance from
 [omp-companion](../omp-companion), packaged as an [oh-my-pi](https://github.com/can1357/oh-my-pi) extension and a
-[Claude Code](https://code.claude.com) plugin. Each host runs the enhancer with its own CLI: omp with `omp -p`, Claude Code
-with `claude -p`. The Claude Code plugin does not need omp.
+[Claude Code](https://code.claude.com) plugin; both also work inside [Tern](https://stencil.so/tern). Each host runs the
+enhancer with its own CLI: omp with `omp -p`, Claude Code with `claude -p`. The Claude Code plugin does not need omp.
 
 ## Modes
 
@@ -41,7 +41,7 @@ If you change the composer while an enhance is running, you're asked before your
 Images and videos attached in the composer stay attached: the enhancer sees each as `[Image #N]`, and the result keeps
 its chip (one the enhancer left out is added at the end). The enhancer reads only the marker, not the image itself.
 
-Works in omp's terminal UI and in omp inside [Tern](https://stencil.so/tern).
+Works in omp's terminal UI and in omp inside [Tern](#tern).
 
 ### Claude Code
 
@@ -83,6 +83,23 @@ Settings, read from the environment Claude Code runs in:
 | `PROMPT_ENHANCER_MODEL` | the session's model | Passed as `--model`, e.g. `sonnet`, `haiku` or a full model name. |
 | `PROMPT_ENHANCER_OAUTH_TOKEN` | the `claude` CLI's own login | A Claude subscription token from `claude setup-token`, passed to `claude -p` as `CLAUDE_CODE_OAUTH_TOKEN`. Set it when that login isn't the session's account or organization. |
 
+### Tern
+
+[Tern](https://stencil.so/tern) runs omp and Claude Code in its panes, and each loads this package itself, so both work
+there as described above. No Tern plugin is involved: Tern's Luau plugins can type into a pane but can't read or replace
+omp's composer.
+
+- **omp**: open an agent block (**New agent block**, ⇧⌘A / Ctrl+Shift+A; its command is `omp` unless you changed it) or run
+  `omp` in a shell pane. Tern draws omp's composer natively; the keys, slash commands, restore, cancel and attachment chips
+  work as in a terminal. Tern's default keymap binds none of Alt+E, Alt+Shift+N and Alt+Shift+E, so they reach omp. A key
+  you bind in Tern's `keybinds`, or one another Tern plugin binds, goes to Tern instead; use the slash command then.
+- The enhancer runs with the omp binary of the session it was started from, Tern's managed omp (**Install omp** in the
+  palette) included, so it never depends on which `omp` is on `PATH`.
+- Closing an agent block (or Tern stopping it) while an enhance runs cancels the enhance.
+- **Claude Code**: run `claude` in a pane, or set it as the agent command. `::e` and `/enhance` work as in any terminal,
+  and the enhanced prompt is copied to the clipboard of the machine `claude` runs on. In a pane on a remote host
+  (`tern remote`) that is the remote host's clipboard, so copy the prompt from the hook's message instead.
+
 ## How it works
 
 Each enhance is one separate, locked-down agent run in the session's folder. It gets the mode's system prompt as text
@@ -104,7 +121,9 @@ session's model and Claude Code's default effort.
 `core/enhance.mjs` has no host-specific code: `runEnhance({ engine: 'omp' | 'claude', mode: 'full' | 'notest' | 'fast', … })`.
 `omp/index.mjs` (omp extension) and `claude/index.mjs` (Claude Code `UserPromptSubmit` and `UserPromptExpansion` hook, wired
 up in `hooks/hooks.json`; `commands/enhance.md`, `commands/enhance-notest.md` and `commands/enhance-fast.md` define the slash
-commands) are thin front ends over it.
+commands) are thin front ends over it. They are Tern's front ends too, since Tern runs omp and Claude Code as they are. The
+omp front end passes `runEnhance` the binary running the session (`process.execPath`, whatever Tern names its managed
+omp), and `omp` on `PATH` only when omp runs from source under bun or node.
 
 ## Install
 
@@ -136,6 +155,13 @@ claude plugin install prompt-enhancer@prompt-enhancer
 The `::e` hook runs on every prompt you submit but exits at once unless the prompt starts with `::e`, `::en` or `::ef`; the
 `/enhance` hook runs only for `/enhance`, `/enhance-notest` and `/enhance-fast`. Their timeout is 300 s, above the
 enhancer's own 270 s limit.
+
+### Tern
+
+Nothing to install for Tern itself: install the omp extension or the Claude Code plugin as above. Tern's managed omp uses
+the same `~/.omp` as any other omp, so `omp plugin link` run in any terminal installs the extension for it too. Agent
+blocks that are already open load it once restarted. For panes on a remote host, install it on that host, where their omp
+or `claude` runs.
 
 ## Develop
 

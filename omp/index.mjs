@@ -11,8 +11,10 @@ export const MODES = {
 	notest: { key: 'alt+shift+n', command: 'enhance-notest', verb: 'Enhancing (no tests)', what: 'a repo-grounded spec without new tests or smoke runs' },
 	fast: { key: 'alt+shift+e', command: 'enhance-fast', verb: 'Fast-enhancing', what: 'a lean prompt (existing checks only, no new tests or smoke runs)' },
 };
-// The omp binary running this extension (Tern ships its own); `omp` on PATH when omp runs from source under bun.
-const OMP = /^omp(\.exe)?$/i.test(path.basename(process.execPath)) ? process.execPath : 'omp';
+// The omp binary running this extension, whatever its file name: Tern's managed omp runs as `omp(.exe)` in its own data
+// folder and keeps versioned copies (`18.18.0.exe`) and the binary an update replaced (`.omp.exe.old-…`), which sessions
+// started before the update still run. `omp` on PATH only when omp runs from source under bun or node.
+const OMP = /^(bun|node)(\.exe)?$/i.test(path.basename(process.execPath)) ? 'omp' : process.execPath;
 
 // The composer shows attachments as chips (`<icon> #N`, icon from the theme) that expand to `[Image #N, WxH]` on submit,
 // and omp drops every attachment whose chip or marker the sent text lacks. The enhancer sees `[Image #N]` markers; the
@@ -105,5 +107,12 @@ export default function promptEnhancer(pi) {
 		});
 	}
 
-	pi.on('session_shutdown', () => job?.abort());
+	// Tern ends an agent block by closing its terminal; omp then quits (exit 129), which need not end the session first, and
+	// the hidden `omp -p` child has no terminal to lose on Windows. `exit` covers every way omp ends.
+	const cancel = () => job?.abort();
+	process.on('exit', cancel);
+	pi.on('session_shutdown', () => {
+		process.off('exit', cancel);
+		cancel();
+	});
 }
