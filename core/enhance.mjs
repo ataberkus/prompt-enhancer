@@ -57,11 +57,13 @@ export const LOOKUP_LIMIT_ENV = 'PROMPT_ENHANCER_LOOKUP_LIMIT';
 // The draft never goes in argv (stdin only): no quoting hazards and no Windows 32K command-line limit.
 // --system-prompt replaces OMP's coding-agent prompt (omp takes a value with a newline as the text, not a file path); the
 // overlay turns off every discovery provider and non-lookup tool; the guard (-e loads even under --no-extensions) confines
-// read/grep/glob to the repository and the mode's lookup limit.
-export function ompArgs({ model, thinking, mode = 'full' } = {}) {
+// read/grep/glob to the repository and the mode's lookup limit. Images go as `@file` arguments, which omp attaches as
+// image blocks after the stdin text, in argv order.
+export function ompArgs({ model, thinking, images = [], mode = 'full' } = {}) {
 	return ['-p', '--mode', 'json', '--no-session', '--no-title', '--no-skills', '--no-extensions', '--no-rules', '--no-lsp',
 		'--tools=read,grep,glob', '--approval-mode=always-ask', '--max-time=240', `--config=${files.overlay}`, '-e', files.guard,
-		...(model ? [`--model=${model}`] : []), ...(thinking ? [`--thinking=${thinking}`] : []), `--system-prompt=${modes[mode].prompt()}`];
+		...(model ? [`--model=${model}`] : []), ...(thinking ? [`--thinking=${thinking}`] : []), `--system-prompt=${modes[mode].prompt()}`,
+		...images.map(({ file }) => `@${path.resolve(file)}`)];
 }
 
 // --setting-sources '' loads no settings files, so no user hooks, plugins or MCP config; --strict-mcp-config drops the
@@ -77,23 +79,34 @@ export function claudeArgs({ model, thinking, lookups, images = [], mode = 'full
 		...(model ? ['--model', model] : []), ...(thinking ? ['--effort', thinking] : []), '--system-prompt', prompt()];
 }
 
-const MEDIA = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp' };
+export const MEDIA = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp' };
+function imageMedia(file) {
+	const media = MEDIA[path.extname(file).slice(1).toLowerCase()];
+	if (!media) throw new Error(`Not a supported image (png, jpg, gif, webp): ${file}`);
+	return media;
+}
 // Images ride in one stream-json user message (text stdin cannot carry them), each after its label: the path as the draft wrote it.
 // images: [{ label, file }].
 export function claudeInput(text, images = []) {
 	if (!images.length) return text;
-	const content = images.flatMap(({ label, file }) => {
-		const media = MEDIA[path.extname(file).slice(1).toLowerCase()];
-		if (!media) throw new Error(`Not a supported image (png, jpg, gif, webp): ${file}`);
-		return [{ type: 'text', text: label }, { type: 'image', source: { type: 'base64', media_type: media, data: readFileSync(file).toString('base64') } }];
-	});
+	const content = images.flatMap(({ label, file }) => [{ type: 'text', text: label },
+		{ type: 'image', source: { type: 'base64', media_type: imageMedia(file), data: readFileSync(file).toString('base64') } }]);
 	return JSON.stringify({ type: 'user', message: { role: 'user', content: [...content, { type: 'text', text }] } }) + '\n';
+}
+
+// omp cannot interleave text and images in its prompt: the `@file` images (ompArgs) follow the stdin text, each announced by
+// a `<file name="…">` line in the same order. The list ties each label (`[Image #N]`) to its place in that order.
+export function ompInput(text, images = []) {
+	if (!images.length) return text;
+	for (const { file } of images) imageMedia(file);
+	const list = images.map(({ label, file }, i) => `${label}: attached image ${i + 1} (${path.resolve(file)})`);
+	return `${text}\n<images>\n${list.join('\n')}\n</images>`;
 }
 
 // Per engine: the default binary, its argv, and how one JSON output line reports a lookup, the answer or a failure.
 export const engines = {
 	omp: {
-		bin: 'omp', args: ompArgs,
+		bin: 'omp', args: ompArgs, input: ompInput,
 		event(f, on) {
 			if (f.type === 'tool_execution_start') on.step(f.toolName, f.args);
 			else if (f.type === 'message_end' && f.message?.role === 'assistant') on.answer(contentText(f.message.content));

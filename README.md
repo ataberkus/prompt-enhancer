@@ -39,7 +39,15 @@ Everything else (restore, cancel, images, clipboard, settings) works the same in
 If you change the composer while an enhance is running, you're asked before your text is replaced.
 
 Images and videos attached in the composer stay attached: the enhancer sees each as `[Image #N]`, and the result keeps
-its chip (one the enhancer left out is added at the end). The enhancer reads only the marker, not the image itself.
+its chip (one the enhancer left out is added at the end), so omp sends the original images with the enhanced prompt.
+
+- `/enhance <prompt>` sent with images attached: the enhancer also sees each image, as an image after the prompt, listed by
+  its `[Image #N]`. The send takes the images out of the composer, so the enhanced prompt shows them as `[Image #N, WxH]`
+  markers and they are attached again when you send it. Videos reach the enhancer only as markers.
+- **Alt+E**: omp doesn't give extensions the composer's images, so the enhancer reads only the markers; a warning says so.
+  The images stay in the composer.
+- An image the enhancer can't see (a model without image input, or not png, jpg, gif or webp) gets a warning and still
+  goes with the prompt you send.
 
 Works in omp's terminal UI and in omp inside [Tern](#tern).
 
