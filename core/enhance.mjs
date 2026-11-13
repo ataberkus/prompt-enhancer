@@ -1,7 +1,7 @@
 // Prompt enhancer core: one read-only, locked-down agent run (`omp -p` or `claude -p`) that rewrites a draft into a
 // repo-grounded spec. Host-agnostic: omp/index.mjs and claude/index.mjs are front ends; others can call runEnhance the same way.
 // system.md, overlay.yml and guard.mjs come from omp-companion (companion/server.mjs ENHANCE_*); keep them in sync.
-// system-fast.md and light-checks.md are this repo's own (`fast` and `notest` modes). claude-guard.mjs is guard.mjs's rules
+// system-fast.md, system-max.md and light-checks.md are this repo's own (`fast`, `max` and `notest` modes). claude-guard.mjs is guard.mjs's rules
 // for Claude Code's tools; keep the two in step.
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
@@ -15,6 +15,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 export const files = {
 	system: path.join(here, 'system.md'),
 	systemFast: path.join(here, 'system-fast.md'),
+	systemMax: path.join(here, 'system-max.md'),
 	lightChecks: path.join(here, 'light-checks.md'),
 	overlay: path.join(here, 'overlay.yml'),
 	guard: path.join(here, 'guard.mjs'),
@@ -43,6 +44,8 @@ const FULL_REGRESSION = ', and include a regression check in Done when.';
 // `notest`: the same spec and Inferred requirements, with the checks swapped for light-checks.md: the repo's existing
 // automated checks only, no new tests, no smoke runs (12 lookups).
 // `fast`: a lean prompt with the same light checks (system-fast.md, 6 lookups).
+// `max`: the draft as a product brief, expanded into the best-in-class feature set of its kind, with the full mode's checks
+// (system-max.md, 12 lookups).
 export const modes = {
 	full: { lookups: 12, prompt: () => text(files.system) },
 	notest: {
@@ -50,6 +53,7 @@ export const modes = {
 		prompt: () => swap(swap(text(files.system), FULL_CHECKS, lightChecks()), FULL_REGRESSION, '; Done when adds no new regression test unless the draft asks for one.'),
 	},
 	fast: { lookups: 6, prompt: () => swap(text(files.systemFast), '{{light-checks}}', lightChecks()) },
+	max: { lookups: 12, prompt: () => text(files.systemMax) },
 };
 // guard.mjs runs inside the omp child, so it gets its lookup limit through the environment.
 export const LOOKUP_LIMIT_ENV = 'PROMPT_ENHANCER_LOOKUP_LIMIT';

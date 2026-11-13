@@ -1,7 +1,7 @@
 {
 	"name": "prompt-enhancer",
-	"version": "0.4.0",
-	"description": "Rewrites a prompt into a repo-grounded spec before it is sent: start a prompt with ::e or use /enhance (no new tests or smoke runs: ::en or /enhance-notest; lean and fast: ::ef or /enhance-fast).",
+	"version": "0.5.0",
+	"description": "Rewrites a prompt into a repo-grounded spec before it is sent: start a prompt with ::e or use /enhance (no new tests or smoke runs: ::en or /enhance-notest; lean and fast: ::ef or /enhance-fast; best-in-class feature set: ::em or /enhance-max).",
 	"author": { "name": "ataberkus" },
 	"repository": "https://github.com/ataberkus/prompt-enhancer"
 }

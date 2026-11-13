@@ -12,6 +12,7 @@ enhancer with its own CLI: omp with `omp -p`, Claude Code with `claude -p`. The 
 | full | **Alt+E**, `/enhance` | `::e`, `/enhance` | Complete spec: Inferred requirements (data shapes, integration, lifecycle, failure paths, sibling flows); its "Done when" asks for tests of the new behaviour | 12 |
 | notest | **Alt+Shift+N**, `/enhance-notest` | `::en`, `/enhance-notest` | The same complete spec and Inferred requirements, with light checks instead of new tests | 12 |
 | fast | **Alt+Shift+E**, `/enhance-fast` | `::ef`, `/enhance-fast` | Lean: the request, at most 5 notes the change cannot work without, assumptions, light checks | 6 |
+| max | **Alt+Shift+M**, `/enhance-max` | `::em`, `/enhance-max` | Best-in-class: the draft read as a product brief and expanded into the feature set the best products of its kind have, including the ones you didn't name; "Done when" runs the repo's existing checks and leaves testing to the agent | 12 |
 
 Light checks (`core/light-checks.md`, shared by notest and fast) tell the agent to
 
@@ -19,6 +20,22 @@ Light checks (`core/light-checks.md`, shared by notest and fast) tell the agent 
 - not write new tests, regression tests included, unless your draft asks for them; only fix existing ones the change breaks;
 - not run smoke tests or anything heavy: no browser or Playwright runs, dev servers, emulators, desktop automation or
   watchers, overriding the agent's own default to smoke-test.
+
+The max mode is for building something, not for a precise change: `::em make a music player` asks for a player with play and
+pause, previous and next, a seek bar with elapsed and remaining time, volume and mute, shuffle and repeat, a queue, keyboard
+shortcuts, remembered volume and position, and empty, loading and error states. Its prompt (`core/system-max.md`) has
+
+- **Feature set**: every item a checkable behaviour, grouped as Core (what you asked for and what the product can't do
+  without), Expected (what every leading product of the kind has), Standout (shortcuts, remembered state, smart defaults,
+  undo…) and Quality (empty, loading, error and edge states, accessibility, responsive layout, performance, persistence).
+  Features that need an account, server, licence, paid API or credentials the repository doesn't have go on one Later line
+  instead of being stubbed;
+- **Implementation**: where it goes and which of the repository's components, stores and helpers it reuses, from the code
+  the enhancer read; a new dependency only where a feature needs one, listed in Assumptions;
+- **Done when**: every feature works, and the repository's existing build, typecheck, lint or test commands pass. It lists
+  no tests to write and asks for none, not even a regression test: whether a test is worth adding is the agent's call;
+- your own choices (a library, a layout, an exclusion) win over the features it adds. A bug fix gets the hardening of the
+  broken flow, not new features; a question stays a question.
 
 Everything else (restore, cancel, images, clipboard, settings) works the same in every mode.
 
@@ -33,7 +50,8 @@ Everything else (restore, cancel, images, clipboard, settings) works the same in
 - **Alt+E** again, before you edit the result: puts your original draft back.
 - **Alt+E** while it runs: cancels.
 - `/enhance <prompt>`: same thing for a prompt you type after the command.
-- **Alt+Shift+N** / `/enhance-notest <prompt>` and **Alt+Shift+E** / `/enhance-fast <prompt>`: the [other modes](#modes);
+- **Alt+Shift+N** / `/enhance-notest <prompt>`, **Alt+Shift+E** / `/enhance-fast <prompt>` and **Alt+Shift+M** /
+  `/enhance-max <prompt>`: the [other modes](#modes);
   the same key again restores or cancels the same way.
 
 If you change the composer while an enhance is running, you're asked before your text is replaced.
@@ -63,8 +81,9 @@ Works in omp's terminal UI and in omp inside [Tern](#tern).
 - If the enhance fails or is cancelled, the message says so (`Enhance failed: …` / `Enhance cancelled.`) and shows your
   draft. Nothing is sent to Claude.
 - `::e` or `/enhance` with nothing after it only shows a reminder.
-- `::en <prompt>` / `/enhance-notest <prompt>` and `::ef <prompt>` / `/enhance-fast <prompt>` (`/prompt-enhancer:enhance-notest`,
-  `/prompt-enhancer:enhance-fast`) run the [other modes](#modes).
+- `::en <prompt>` / `/enhance-notest <prompt>`, `::ef <prompt>` / `/enhance-fast <prompt>` and `::em <prompt>` /
+  `/enhance-max <prompt>` (`/prompt-enhancer:enhance-notest`, `/prompt-enhancer:enhance-fast`, `/prompt-enhancer:enhance-max`)
+  run the [other modes](#modes).
 - Cloud sessions (an environment other than this computer) don't load locally installed plugins, so neither works there:
   `::e` goes to Claude as written and `/enhance` only says the hook didn't run.
 - The enhancer gets the last 6 turns of the Claude Code conversation, read from the session transcript, and runs on the
@@ -99,7 +118,7 @@ omp's composer.
 
 - **omp**: open an agent block (**New agent block**, ⇧⌘A / Ctrl+Shift+A; its command is `omp` unless you changed it) or run
   `omp` in a shell pane. Tern draws omp's composer natively; the keys, slash commands, restore, cancel and attachment chips
-  work as in a terminal. Tern's default keymap binds none of Alt+E, Alt+Shift+N and Alt+Shift+E, so they reach omp. A key
+  work as in a terminal. Tern's default keymap binds none of Alt+E, Alt+Shift+N, Alt+Shift+E and Alt+Shift+M, so they reach omp. A key
   you bind in Tern's `keybinds`, or one another Tern plugin binds, goes to Tern instead; use the slash command then.
 - The enhancer runs with the omp binary of the session it was started from, Tern's managed omp (**Install omp** in the
   palette) included, so it never depends on which `omp` is on `PATH`.
@@ -113,7 +132,7 @@ omp's composer.
 Each enhance is one separate, locked-down agent run in the session's folder. It gets the mode's system prompt as text
 (`modes` in `core/enhance.mjs`): `core/system.md` for full; for notest the same file with its "Done when" checks and
 bug-fix regression check swapped for `core/light-checks.md`; for fast `core/system-fast.md` with `core/light-checks.md` in
-its `{{light-checks}}` slot. It gets your draft and the last 6 turns of the conversation on stdin, and writes nothing.
+its `{{light-checks}}` slot; for max `core/system-max.md`. It gets your draft and the last 6 turns of the conversation on stdin, and writes nothing.
 
 - **omp** (`omp -p`): only `read`, `grep` and `glob`, inside the repository, at most 12 lookups (6 in fast mode) and no `.env` files
   (`core/guard.mjs`); every discovery provider, MCP, memory and other tools are off (`core/overlay.yml`).
@@ -126,10 +145,10 @@ In omp it runs on an `enhance` model role if you configured one (`modelRoles.enh
 the session's model and thinking level. In Claude Code it uses `PROMPT_ENHANCER_MODEL`/`PROMPT_ENHANCER_EFFORT`, or the
 session's model and Claude Code's default effort.
 
-`core/enhance.mjs` has no host-specific code: `runEnhance({ engine: 'omp' | 'claude', mode: 'full' | 'notest' | 'fast', … })`.
+`core/enhance.mjs` has no host-specific code: `runEnhance({ engine: 'omp' | 'claude', mode: 'full' | 'notest' | 'fast' | 'max', … })`.
 `omp/index.mjs` (omp extension) and `claude/index.mjs` (Claude Code `UserPromptSubmit` and `UserPromptExpansion` hook, wired
-up in `hooks/hooks.json`; `commands/enhance.md`, `commands/enhance-notest.md` and `commands/enhance-fast.md` define the slash
-commands) are thin front ends over it. They are Tern's front ends too, since Tern runs omp and Claude Code as they are. The
+up in `hooks/hooks.json`; `commands/enhance.md`, `commands/enhance-notest.md`, `commands/enhance-fast.md` and `commands/enhance-max.md`
+define the slash commands) are thin front ends over it. They are Tern's front ends too, since Tern runs omp and Claude Code as they are. The
 omp front end passes `runEnhance` the binary running the session (`process.execPath`, whatever Tern names its managed
 omp), and `omp` on `PATH` only when omp runs from source under bun or node.
 
@@ -160,8 +179,8 @@ claude plugin marketplace add /path/to/prompt-enhancer
 claude plugin install prompt-enhancer@prompt-enhancer
 ```
 
-The `::e` hook runs on every prompt you submit but exits at once unless the prompt starts with `::e`, `::en` or `::ef`; the
-`/enhance` hook runs only for `/enhance`, `/enhance-notest` and `/enhance-fast`. Their timeout is 300 s, above the
+The `::e` hook runs on every prompt you submit but exits at once unless the prompt starts with `::e`, `::en`, `::ef` or `::em`;
+the `/enhance` hook runs only for `/enhance`, `/enhance-notest`, `/enhance-fast` and `/enhance-max`. Their timeout is 300 s, above the
 enhancer's own 270 s limit.
 
 ### Tern
@@ -182,6 +201,6 @@ npm test
 apart; the one local change is `guard.mjs` reading its lookup limit from `PROMPT_ENHANCER_LOOKUP_LIMIT` (set per mode by
 `runEnhance`). The notest mode swaps two passages of `core/system.md` (`FULL_CHECKS`, `FULL_REGRESSION` in
 `core/enhance.mjs`); if a re-sync changes them, the notest enhance fails with `Prompt passage not found` and `npm test`
-fails, so update the passages there. `core/system-fast.md` and `core/light-checks.md` exist only here.
+fails, so update the passages there. `core/system-fast.md`, `core/system-max.md` and `core/light-checks.md` exist only here.
 `core/claude-guard.mjs` applies `core/guard.mjs`'s rules to Claude Code's tools (its limit is the hook command's third
 argument); keep the two in step.

@@ -1,7 +1,7 @@
 {
 	"name": "prompt-enhancer",
-	"version": "0.4.0",
-	"description": "Rewrites a coding-agent prompt into a repo-grounded spec. omp extension (alt+e, /enhance; no new tests or smoke runs: alt+shift+n, /enhance-notest; fast: alt+shift+e, /enhance-fast) and Claude Code plugin (::e or /enhance; ::en or /enhance-notest; fast: ::ef or /enhance-fast; no omp needed). Both also work inside Tern.",
+	"version": "0.5.0",
+	"description": "Rewrites a coding-agent prompt into a repo-grounded spec. omp extension (alt+e, /enhance; no new tests or smoke runs: alt+shift+n, /enhance-notest; fast: alt+shift+e, /enhance-fast; best-in-class feature set: alt+shift+m, /enhance-max) and Claude Code plugin (::e or /enhance; ::en or /enhance-notest; fast: ::ef or /enhance-fast; max: ::em or /enhance-max; no omp needed). Both also work inside Tern.",
 	"type": "module",
 	"private": true,
 	"keywords": ["omp-plugin", "oh-my-pi", "claude-code", "claude-code-plugin", "tern", "prompt"],

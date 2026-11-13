@@ -1,6 +1,6 @@
 // omp extension: alt+e rewrites the composer draft with the enhancer, alt+shift+n with its no-test mode, alt+shift+e with
-// its fast mode; the same key again restores the draft (or cancels a run). `/enhance`, `/enhance-notest` and
-// `/enhance-fast <prompt>` do the same for hosts whose composer the extension cannot read.
+// its fast mode, alt+shift+m with its max mode; the same key again restores the draft (or cancels a run). `/enhance`,
+// `/enhance-notest`, `/enhance-fast` and `/enhance-max <prompt>` do the same for hosts whose composer the extension cannot read.
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -12,6 +12,7 @@ export const MODES = {
 	full: { key: 'alt+e', command: 'enhance', verb: 'Enhancing', what: 'a repo-grounded spec' },
 	notest: { key: 'alt+shift+n', command: 'enhance-notest', verb: 'Enhancing (no tests)', what: 'a repo-grounded spec without new tests or smoke runs' },
 	fast: { key: 'alt+shift+e', command: 'enhance-fast', verb: 'Fast-enhancing', what: 'a lean prompt (existing checks only, no new tests or smoke runs)' },
+	max: { key: 'alt+shift+m', command: 'enhance-max', verb: 'Max-enhancing', what: 'a best-in-class spec (the full feature set of the best products of its kind)' },
 };
 const COMMAND = new RegExp(`^/(${Object.values(MODES).map(M => M.command).join('|')})(?:\\s|$)`);
 // The omp binary running this extension, whatever its file name: Tern's managed omp runs as `omp(.exe)` in its own data

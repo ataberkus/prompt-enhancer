@@ -28,7 +28,7 @@ test('transcriptMessages keeps only user and assistant chat text from a Claude C
 	]);
 });
 
-test('parseDraft takes the text after a leading ::e (full), ::en (notest) or ::ef (fast) and ignores other prompts', () => {
+test('parseDraft takes the text after a leading ::e (full), ::en (notest), ::ef (fast) or ::em (max) and ignores other prompts', () => {
 	assert.deepEqual(parseDraft('::e fix the\nlogin bug '), { mode: 'full', draft: 'fix the\nlogin bug' });
 	assert.deepEqual(parseDraft('  ::e\n\nmultiline'), { mode: 'full', draft: 'multiline' });
 	assert.deepEqual(parseDraft('::e'), { mode: 'full', draft: '' });
@@ -39,6 +39,10 @@ test('parseDraft takes the text after a leading ::e (full), ::en (notest) or ::e
 	assert.equal(parseDraft('::enable it'), null);
 	assert.equal(parseDraft('::eat this'), null);
 	assert.equal(parseDraft('::efx this'), null);
+	assert.deepEqual(parseDraft('::em müzik player yap'), { mode: 'max', draft: 'müzik player yap' });
+	assert.deepEqual(parseDraft('::em'), { mode: 'max', draft: '' });
+	assert.equal(parseDraft('::emx this'), null);
+	assert.equal(parseDraft('::embed it'), null);
 	assert.equal(parseDraft('please ::e this'), null);
 	assert.equal(parseDraft(undefined), null);
 });
@@ -49,6 +53,8 @@ test('hookRequest picks the mode from the slash command, or from the marker on a
 	assert.deepEqual(expand('prompt-enhancer:enhance-fast', 'fix it'), { mode: 'fast', draft: 'fix it' });
 	assert.deepEqual(expand('prompt-enhancer:enhance-notest', 'fix it'), { mode: 'notest', draft: 'fix it' });
 	assert.deepEqual(expand('prompt-enhancer:enhance-fast'), { mode: 'fast', draft: '' });
+	assert.deepEqual(expand('prompt-enhancer:enhance-max', 'music player'), { mode: 'max', draft: 'music player' });
+	assert.deepEqual(hookRequest({ hook_event_name: 'UserPromptSubmit', prompt: '::em music player' }), { mode: 'max', draft: 'music player' });
 	assert.deepEqual(hookRequest({ hook_event_name: 'UserPromptSubmit', prompt: '::ef fix it' }), { mode: 'fast', draft: 'fix it' });
 	assert.equal(hookRequest({ hook_event_name: 'UserPromptSubmit', prompt: 'fix it' }), null);
 });

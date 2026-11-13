@@ -1,6 +1,6 @@
 // Claude Code front end: a UserPromptSubmit and a UserPromptExpansion hook (hooks/hooks.json). A prompt starting with `::e`
-// (`::en` for the no-test mode, `::ef` for the fast mode), or `/enhance <draft>` (`/enhance-notest`, `/enhance-fast`), never
-// reaches Claude; a separate locked-down `claude -p` run rewrites the draft, and the hook blocks the submit with the enhanced
+// (`::en` for the no-test mode, `::ef` for the fast mode, `::em` for the max mode), or `/enhance <draft>` (`/enhance-notest`,
+// `/enhance-fast`, `/enhance-max`), never reaches Claude; a separate locked-down `claude -p` run rewrites the draft, and the hook blocks the submit with the enhanced
 // prompt as its message, also copied to the clipboard. Needs only Claude Code and node; no omp.
 import { spawnSync } from 'node:child_process';
 import { readFileSync, realpathSync, statSync } from 'node:fs';
@@ -8,8 +8,9 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { contentText, runEnhance } from '../core/enhance.mjs';
 
-// Prompt markers and their modes (core/enhance.mjs `modes`); the slash commands are /enhance, /enhance-notest, /enhance-fast.
-export const MARKERS = { '::e': 'full', '::en': 'notest', '::ef': 'fast' };
+// Prompt markers and their modes (core/enhance.mjs `modes`); the slash commands are /enhance, /enhance-notest, /enhance-fast,
+// /enhance-max.
+export const MARKERS = { '::e': 'full', '::en': 'notest', '::ef': 'fast', '::em': 'max' };
 export const ENV = { claude: 'PROMPT_ENHANCER_CLAUDE', model: 'PROMPT_ENHANCER_MODEL', effort: 'PROMPT_ENHANCER_EFFORT', token: 'PROMPT_ENHANCER_OAUTH_TOKEN' };
 
 // Claude Code withholds the session's sign-in (CLAUDE_CODE_OAUTH_TOKEN) from hooks, so `claude -p` signs in with the login
@@ -21,15 +22,15 @@ export function enhanceEnv(env = process.env) {
 
 // → { mode, draft } with the draft after the marker ('' when nothing follows it), or null when the prompt is not an enhance request.
 export function parseDraft(prompt) {
-	const m = String(prompt ?? '').match(/^\s*(::e[nf]?)(?:\s+([\s\S]*))?$/);
+	const m = String(prompt ?? '').match(/^\s*(::e[nfm]?)(?:\s+([\s\S]*))?$/);
 	return m ? { mode: MARKERS[m[1]], draft: (m[2] ?? '').trim() } : null;
 }
 
-// The enhance request in a hook payload, or null. `/enhance[-notest|-fast] <draft>` arrives as UserPromptExpansion (hooks.json
-// matches only those commands, as `prompt-enhancer:enhance…`); `::e`, `::en` or `::ef <draft>` as UserPromptSubmit.
+// The enhance request in a hook payload, or null. `/enhance[-notest|-fast|-max] <draft>` arrives as UserPromptExpansion
+// (hooks.json matches only those commands, as `prompt-enhancer:enhance…`); `::e`, `::en`, `::ef` or `::em <draft>` as UserPromptSubmit.
 export function hookRequest(input) {
 	if (input?.hook_event_name !== 'UserPromptExpansion') return parseDraft(input?.prompt);
-	const m = String(input.command_name ?? '').match(/enhance-(notest|fast)$/);
+	const m = String(input.command_name ?? '').match(/enhance-(notest|fast|max)$/);
 	return { mode: m ? m[1] : 'full', draft: String(input.command_args ?? '').trim() };
 }
 
@@ -89,7 +90,7 @@ export function enhancedOutput(text, images = []) {
 	const missing = images.filter(i => !text.includes(i.label) && !text.includes(i.file));
 	return block(missing.length ? `${text}\n\n${missing.map(i => `Image: ${i.file}`).join('\n')}` : text, false);
 }
-export const emptyOutput = () => block('Write a prompt after ::e (::en: no new tests or smoke runs, ::ef: fast) or /enhance (/enhance-notest, /enhance-fast) first, e.g. `::e fix the login redirect`.', true);
+export const emptyOutput = () => block('Write a prompt after ::e (::en: no new tests or smoke runs, ::ef: fast, ::em: max, the best-in-class feature set) or /enhance (/enhance-notest, /enhance-fast, /enhance-max) first, e.g. `::e fix the login redirect`.', true);
 export function failedOutput(e, env = process.env) {
 	if (e?.name === 'AbortError') return block('Enhance cancelled.', true);
 	// spawn without a shell finds claude.exe but not an npm claude.cmd shim on Windows, and reports only `spawn claude ENOENT`.

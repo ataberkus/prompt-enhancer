@@ -16,6 +16,17 @@ test('mode prompts: notest is the full spec up to Done when; notest and fast swa
 	}
 });
 
+// max asks for the best-in-class feature set and the repo's existing checks; whether to add tests is left to the agent.
+test('mode prompts: max expands the draft into a best-in-class feature set and leaves testing to the agent', () => {
+	const max = modes.max.prompt();
+	assert.equal(modes.max.lookups, 12);
+	for (const s of ['2. **Feature set**', '**Core**', '**Expected**', '**Standout**', '**Quality**', '**Later**', '5. **Done when**']) assert.ok(max.includes(s), s);
+	assert.match(max, /testing is the agent's call: do not list tests to write/);
+	assert.doesNotMatch(max, /Add tests for|regression check in Done when/);
+	assert.match(max, /explicit choices .* win over anything you add/);
+	assert.doesNotMatch(max, /no smoke runs|\{\{/);
+});
+
 test('branchMessages keeps only user and assistant text from an omp branch', () => {
 	const entries = [
 		{ type: 'message', message: { role: 'user', content: 'fix the sync bug' } },
