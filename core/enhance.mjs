@@ -1,8 +1,8 @@
 // Prompt enhancer core: one read-only, locked-down agent run (`omp -p` or `claude -p`) that rewrites a draft into a
 // repo-grounded spec. Host-agnostic: omp/index.mjs and claude/index.mjs are front ends; others can call runEnhance the same way.
-// system.md, overlay.yml and guard.mjs come from omp-companion (companion/server.mjs ENHANCE_*); keep them in sync.
-// system-fast.md, system-max.md, light-checks.md and added-features.md are this repo's own (the mode swaps below). claude-guard.mjs is guard.mjs's rules
-// for Claude Code's tools; keep the two in step.
+// system.md, system-fast.md, system-max.md, light-checks.md, overlay.yml and guard.mjs are also in omp-companion
+// (companion/enhance-prompts.mjs ENHANCE_*); keep them in sync. claude-guard.mjs is guard.mjs's rules for Claude Code's
+// tools; keep the two in step.
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { readFileSync, rmSync } from 'node:fs';
@@ -17,7 +17,6 @@ export const files = {
 	systemFast: path.join(here, 'system-fast.md'),
 	systemMax: path.join(here, 'system-max.md'),
 	lightChecks: path.join(here, 'light-checks.md'),
-	addedFeatures: path.join(here, 'added-features.md'),
 	overlay: path.join(here, 'overlay.yml'),
 	guard: path.join(here, 'guard.mjs'),
 	claudeGuard: path.join(here, 'claude-guard.mjs'),
@@ -39,19 +38,6 @@ const FULL_CHECKS = [
 	'   - the check runs in a few minutes without a person (never a manual browser, device or network-tab check). Tell the agent to run it before it finishes.',
 ].join('\n');
 const FULL_REGRESSION = ', and include a regression check in Done when.';
-// system.md with an Added features section (added-features.md) after Inferred requirements: the features the best products
-// of the kind have that the draft did not name. The later sections move up one number; Done when covers the new section.
-function withAddedFeatures(prompt) {
-	const swaps = [
-		['keep it visibly separate from what they asked.', 'keep it visibly separate from what they asked. For a feature or something new, also add the features the best products of its kind have that the user did not name (Added features).'],
-		['3. **Assumptions**', `${text(files.addedFeatures).trimEnd()}\n\n4. **Assumptions**`],
-		['4. **Done when**', '5. **Done when**'],
-		['then every Inferred requirement, with no', 'then every Inferred requirement and Added feature, with no'],
-		['use all four sections.', 'use all five sections.'],
-		['tell the agent to find and fix the root cause, not the symptom.', 'tell the agent to find and fix the root cause, not the symptom. No Added features.'],
-	];
-	return swaps.reduce((p, [from, to]) => swap(p, from, to), prompt);
-}
 
 // Per mode: the system prompt text and the lookup limit.
 // `full`: the complete spec with Added features; its Done when adds tests (system.md, 12 lookups).
@@ -61,10 +47,10 @@ function withAddedFeatures(prompt) {
 // `max`: the draft as a product brief, expanded into the best-in-class feature set of its kind, with the full mode's checks
 // (system-max.md, 12 lookups).
 export const modes = {
-	full: { lookups: 12, prompt: () => withAddedFeatures(text(files.system)) },
+	full: { lookups: 12, prompt: () => text(files.system) },
 	notest: {
 		lookups: 12,
-		prompt: () => swap(swap(withAddedFeatures(text(files.system)), FULL_CHECKS, lightChecks()), FULL_REGRESSION, '; Done when adds no new regression test unless the draft asks for one.'),
+		prompt: () => swap(swap(text(files.system), FULL_CHECKS, lightChecks()), FULL_REGRESSION, '; Done when adds no new regression test unless the draft asks for one.'),
 	},
 	fast: { lookups: 6, prompt: () => swap(text(files.systemFast), '{{light-checks}}', lightChecks()) },
 	max: { lookups: 12, prompt: () => text(files.systemMax) },
