@@ -5,14 +5,27 @@ import { branchMessages, cleanEnhanced, enhanceInput, modes } from '../core/enha
 // system.md is re-synced from omp-companion; notest must still swap out every passage that asks for new tests.
 test('mode prompts: notest is the full spec up to Done when; notest and fast swap adding tests for light checks', () => {
 	const full = modes.full.prompt(), notest = modes.notest.prompt(), fast = modes.fast.prompt();
-	const head = p => p.slice(0, p.indexOf('4. **Done when**'));
-	assert.ok(full.includes('4. **Done when**') && notest.includes('4. **Done when**'));
+	const head = p => p.slice(0, p.indexOf('5. **Done when**'));
+	assert.ok(full.includes('5. **Done when**') && notest.includes('5. **Done when**'));
 	assert.equal(head(notest), head(full));
 	assert.match(full, /Add tests for the new behaviour/);
 	for (const p of [notest, fast]) {
 		assert.doesNotMatch(p, /Add tests for the new behaviour|regression check in Done when|\{\{/);
 		assert.match(p, /no new tests unless the draft asks for them/);
 		assert.match(p, /no smoke runs/);
+	}
+});
+
+// full and notest add the features the best products of the kind have, as their own section between Inferred requirements and Assumptions.
+test('mode prompts: full and notest have an Added features section, numbered in order and covered by Done when', () => {
+	for (const p of [modes.full.prompt(), modes.notest.prompt()]) {
+		const at = s => p.indexOf(s);
+		assert.ok(at('2. **Inferred requirements**') < at('3. **Added features**') && at('3. **Added features**') < at('4. **Assumptions**') && at('4. **Assumptions**') < at('5. **Done when**'));
+		assert.equal(p.match(/^\d\. \*\*/gm).length, 5);
+		assert.match(p, /then every Inferred requirement and Added feature, with no/);
+		assert.match(p, /use all five sections\./);
+		assert.match(p, /not the symptom\. No Added features\./);
+		assert.match(p, /explicit choices .* win/);
 	}
 });
 

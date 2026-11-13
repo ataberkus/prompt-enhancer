@@ -9,8 +9,8 @@ enhancer with its own CLI: omp with `omp -p`, Claude Code with `claude -p`. The 
 
 | Mode | omp | Claude Code | The enhanced prompt | Lookups |
 | :- | :- | :- | :- | :- |
-| full | **Alt+E**, `/enhance` | `::e`, `/enhance` | Complete spec: Inferred requirements (data shapes, integration, lifecycle, failure paths, sibling flows); its "Done when" asks for tests of the new behaviour | 12 |
-| notest | **Alt+Shift+N**, `/enhance-notest` | `::en`, `/enhance-notest` | The same complete spec and Inferred requirements, with light checks instead of new tests | 12 |
+| full | **Alt+E**, `/enhance` | `::e`, `/enhance` | Complete spec: Inferred requirements (data shapes, integration, lifecycle, failure paths, sibling flows); Added features; its "Done when" asks for tests of the new behaviour | 12 |
+| notest | **Alt+Shift+N**, `/enhance-notest` | `::en`, `/enhance-notest` | The same complete spec, Inferred requirements and Added features, with light checks instead of new tests | 12 |
 | fast | **Alt+Shift+E**, `/enhance-fast` | `::ef`, `/enhance-fast` | Lean: the request, at most 5 notes the change cannot work without, assumptions, light checks | 6 |
 | max | **Alt+Shift+M**, `/enhance-max` | `::em`, `/enhance-max` | Best-in-class: the draft read as a product brief and expanded into the feature set the best products of its kind have, including the ones you didn't name; "Done when" runs the repo's existing checks and leaves testing to the agent | 12 |
 
@@ -20,6 +20,13 @@ Light checks (`core/light-checks.md`, shared by notest and fast) tell the agent 
 - not write new tests, regression tests included, unless your draft asks for them; only fix existing ones the change breaks;
 - not run smoke tests or anything heavy: no browser or Playwright runs, dev servers, emulators, desktop automation or
   watchers, overriding the agent's own default to smoke-test.
+
+Added features (full and notest, `core/added-features.md`): for a feature or something new, the spec also lists the
+features the best products of its kind have that you didn't name, usually 3 to 8, each a checkable behaviour in one line,
+built with the repository's stack. `::e make a music player` gets a seek bar, volume and mute, shuffle and repeat, a queue,
+keyboard shortcuts and the like on top of play and pause. Your own choices win; what the repository already has, and what
+needs an account, server, paid API or credentials it doesn't have, is left out. A bug fix or a question gets none. Max mode
+goes further:
 
 The max mode is for building something, not for a precise change: `::em make a music player` asks for a player with play and
 pause, previous and next, a seek bar with elapsed and remaining time, volume and mute, shuffle and repeat, a queue, keyboard
@@ -130,8 +137,8 @@ omp's composer.
 ## How it works
 
 Each enhance is one separate, locked-down agent run in the session's folder. It gets the mode's system prompt as text
-(`modes` in `core/enhance.mjs`): `core/system.md` for full; for notest the same file with its "Done when" checks and
-bug-fix regression check swapped for `core/light-checks.md`; for fast `core/system-fast.md` with `core/light-checks.md` in
+(`modes` in `core/enhance.mjs`): for full `core/system.md` with `core/added-features.md` inserted as its section 3; for
+notest the same, with its "Done when" checks and bug-fix regression check swapped for `core/light-checks.md`; for fast `core/system-fast.md` with `core/light-checks.md` in
 its `{{light-checks}}` slot; for max `core/system-max.md`. It gets your draft and the last 6 turns of the conversation on stdin, and writes nothing.
 
 - **omp** (`omp -p`): only `read`, `grep` and `glob`, inside the repository, at most 12 lookups (6 in fast mode) and no `.env` files
@@ -199,8 +206,8 @@ npm test
 `core/system.md`, `core/overlay.yml` and `core/guard.mjs` were copied from omp-companion's `companion/server.mjs`
 (`ENHANCE_SYSTEM`, `ENHANCE_OVERLAY`, `ENHANCE_GUARD`) at commit `fba8f5a`. Change them in both places, or the two drift
 apart; the one local change is `guard.mjs` reading its lookup limit from `PROMPT_ENHANCER_LOOKUP_LIMIT` (set per mode by
-`runEnhance`). The notest mode swaps two passages of `core/system.md` (`FULL_CHECKS`, `FULL_REGRESSION` in
-`core/enhance.mjs`); if a re-sync changes them, the notest enhance fails with `Prompt passage not found` and `npm test`
-fails, so update the passages there. `core/system-fast.md`, `core/system-max.md` and `core/light-checks.md` exist only here.
+`runEnhance`). The full and notest modes change passages of `core/system.md` (`withAddedFeatures`, `FULL_CHECKS`,
+`FULL_REGRESSION` in `core/enhance.mjs`); if a re-sync changes them, those enhances fail with `Prompt passage not found` and `npm test`
+fails, so update the passages there. `core/system-fast.md`, `core/system-max.md`, `core/light-checks.md` and `core/added-features.md` exist only here.
 `core/claude-guard.mjs` applies `core/guard.mjs`'s rules to Claude Code's tools (its limit is the hook command's third
 argument); keep the two in step.
