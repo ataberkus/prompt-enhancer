@@ -289,17 +289,16 @@ is a no-op outside enhancer runs.
 ### Antigravity IDE
 
 Needs `node` (20 or later) and `agy` (or `claude` / `omp` via `promptEnhancer.engine`). Verified against Antigravity IDE
-1.107.0 (VS Code-based). Marketplace (Open VSX) publishing is not included; install locally by linking `antigravity/`
-into your Antigravity IDE extensions directory (or launching with `--extensions-dir`):
+1.107.0 (VS Code-based). Marketplace (Open VSX) publishing is not included; build the local `.vsix` package and install
+it with `antigravity-ide`:
 
 ```sh
-# macOS / Linux:
-ln -s /path/to/prompt-enhancer/antigravity ~/.antigravity-ide/extensions/prompt-enhancer-antigravity
-# Windows (PowerShell):
-New-Item -ItemType Junction -Path "$env:USERPROFILE\.antigravity-ide\extensions\prompt-enhancer-antigravity" -Target "C:\path\to\prompt-enhancer\antigravity"
+npm run vsix
+antigravity-ide --install-extension prompt-enhancer-antigravity.vsix --force
 ```
 
-Reload the Antigravity IDE window, then press **Alt+E** or open the Command Palette and run `Prompt Enhancer: Enhance`.
+Rebuild and reinstall the `.vsix` after making local edits. Reload the Antigravity IDE window, then press **Alt+E** or
+open the Command Palette and run `Prompt Enhancer: Enhance`.
 
 ### Tern
 

@@ -10,7 +10,8 @@
 	},
 	"files": ["core", "omp", "claude", "antigravity", "antigravity-cli", "commands", "hooks", "skills", ".claude-plugin", ".antigravity-plugin", "hooks.json"],
 	"scripts": {
-		"test": "node --test"
+		"test": "node --test",
+		"vsix": "node antigravity/pack-vsix.mjs"
 	},
 	"engines": {
 		"node": ">=20"

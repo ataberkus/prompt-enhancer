@@ -11,6 +11,7 @@ import {
 	draftImages, emptyOutput, enhancedOutput, failedOutput, hookRequest, resolveEngine, transcriptMessages, transcriptModel,
 } from '../antigravity-cli/index.mjs';
 import { COMMANDS, MODES, activateWith, formatError, resolveConfig } from '../antigravity/index.mjs';
+import { packVsix } from '../antigravity/pack-vsix.mjs';
 
 test('antigravity engine args, input and event parsing', t => {
 	const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'prompt-enhancer-agy-'));
@@ -262,4 +263,37 @@ test('antigravity IDE extension: selection replace, restore, cancel, modified gu
 	enhanceFn = async () => { throw new Error('The enhancer returned no text.'); };
 	await registered.get(COMMANDS.full)();
 	assert.equal(errors.at(-1), 'Enhance failed: The enhancer returned no text.');
+});
+
+test('packVsix creates a valid ZIP archive containing manifest, extension and core files', t => {
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'prompt-enhancer-vsix-'));
+	t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+	const out = packVsix(path.join(dir, 'test.vsix'));
+	const buf = fs.readFileSync(out);
+	assert.equal(buf.subarray(0, 4).toString('hex'), '504b0304');
+
+	// Read central directory entry names from EOCD.
+	const eocdOffset = buf.lastIndexOf(Buffer.from([0x50, 0x4b, 0x05, 0x06]));
+	assert.ok(eocdOffset >= 0);
+	const totalEntries = buf.readUInt16LE(eocdOffset + 10);
+	let cursor = buf.readUInt32LE(eocdOffset + 16);
+	const names = [];
+	for (let i = 0; i < totalEntries; i++) {
+		assert.equal(buf.readUInt32LE(cursor), 0x02014b50);
+		const nameLen = buf.readUInt16LE(cursor + 28);
+		const extraLen = buf.readUInt16LE(cursor + 30);
+		const commentLen = buf.readUInt16LE(cursor + 32);
+		names.push(buf.subarray(cursor + 46, cursor + 46 + nameLen).toString('utf8'));
+		cursor += 46 + nameLen + extraLen + commentLen;
+	}
+	for (const expected of [
+		'[Content_Types].xml',
+		'extension.vsixmanifest',
+		'extension/package.json',
+		'extension/antigravity/extension.cjs',
+		'extension/antigravity/index.mjs',
+		'extension/core/enhance.mjs',
+	]) {
+		assert.ok(names.includes(expected), `missing ${expected}`);
+	}
 });
