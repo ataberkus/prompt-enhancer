@@ -1,0 +1,101 @@
+{
+  "name": "prompt-enhancer-antigravity",
+  "displayName": "Prompt Enhancer",
+  "description": "Rewrites a coding-agent prompt into a repo-grounded spec inside Antigravity IDE (Alt+E, Alt+Shift+N, Alt+Shift+E, Alt+Shift+M).",
+  "version": "0.5.0",
+  "publisher": "prompt-enhancer",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onCommand:promptEnhancer.enhance",
+    "onCommand:promptEnhancer.enhanceNotest",
+    "onCommand:promptEnhancer.enhanceFast",
+    "onCommand:promptEnhancer.enhanceMax",
+    "onCommand:promptEnhancer.cancel"
+  ],
+  "main": "./extension.cjs",
+  "contributes": {
+    "commands": [
+      {
+        "command": "promptEnhancer.enhance",
+        "title": "Prompt Enhancer: Enhance"
+      },
+      {
+        "command": "promptEnhancer.enhanceNotest",
+        "title": "Prompt Enhancer: Enhance (no tests)"
+      },
+      {
+        "command": "promptEnhancer.enhanceFast",
+        "title": "Prompt Enhancer: Enhance (fast)"
+      },
+      {
+        "command": "promptEnhancer.enhanceMax",
+        "title": "Prompt Enhancer: Enhance (max)"
+      },
+      {
+        "command": "promptEnhancer.cancel",
+        "title": "Prompt Enhancer: Cancel"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "promptEnhancer.enhance",
+        "key": "alt+e"
+      },
+      {
+        "command": "promptEnhancer.enhanceNotest",
+        "key": "alt+shift+n"
+      },
+      {
+        "command": "promptEnhancer.enhanceFast",
+        "key": "alt+shift+e"
+      },
+      {
+        "command": "promptEnhancer.enhanceMax",
+        "key": "alt+shift+m"
+      }
+    ],
+    "configuration": {
+      "title": "Prompt Enhancer",
+      "properties": {
+        "promptEnhancer.engine": {
+          "type": "string",
+          "enum": [
+            "antigravity",
+            "claude",
+            "omp"
+          ],
+          "default": "antigravity",
+          "description": "CLI engine used to run the enhancer (overridden by PROMPT_ENHANCER_ENGINE)."
+        },
+        "promptEnhancer.binary": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the CLI executable (overridden by PROMPT_ENHANCER_ANTIGRAVITY / PROMPT_ENHANCER_CLAUDE / PROMPT_ENHANCER_OMP)."
+        },
+        "promptEnhancer.model": {
+          "type": "string",
+          "default": "",
+          "description": "Model override for the enhancer run (overridden by PROMPT_ENHANCER_MODEL)."
+        },
+        "promptEnhancer.effort": {
+          "type": "string",
+          "enum": [
+            "",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "default": "",
+          "description": "Reasoning effort / thinking level override (overridden by PROMPT_ENHANCER_EFFORT)."
+        }
+      }
+    }
+  }
+}

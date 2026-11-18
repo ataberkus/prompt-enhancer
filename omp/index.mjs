@@ -4,16 +4,11 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { MEDIA, branchMessages, runEnhance } from '../core/enhance.mjs';
+import { MEDIA, branchMessages, modes, runEnhance } from '../core/enhance.mjs';
 
 const STATUS = 'prompt-enhancer';
 // Per enhance mode (core/enhance.mjs `modes`): its composer key, command and status wording.
-export const MODES = {
-	full: { key: 'alt+e', command: 'enhance', verb: 'Enhancing', what: 'a repo-grounded spec' },
-	notest: { key: 'alt+shift+n', command: 'enhance-notest', verb: 'Enhancing (no tests)', what: 'a repo-grounded spec without new tests or smoke runs' },
-	fast: { key: 'alt+shift+e', command: 'enhance-fast', verb: 'Fast-enhancing', what: 'a lean prompt (existing checks only, no new tests or smoke runs)' },
-	max: { key: 'alt+shift+m', command: 'enhance-max', verb: 'Max-enhancing', what: 'a best-in-class spec (the full feature set of the best products of its kind)' },
-};
+export const MODES = Object.fromEntries(Object.entries(modes).map(([id, { key, command, verb, what }]) => [id, { key, command, verb, what }]));
 const COMMAND = new RegExp(`^/(${Object.values(MODES).map(M => M.command).join('|')})(?:\\s|$)`);
 // The omp binary running this extension, whatever its file name: Tern's managed omp runs as `omp(.exe)` in its own data
 // folder and keeps versioned copies (`18.18.0.exe`) and the binary an update replaced (`.omp.exe.old-…`), which sessions

@@ -2,15 +2,11 @@
 // (`::en` for the no-test mode, `::ef` for the fast mode, `::em` for the max mode), or `/enhance <draft>` (`/enhance-notest`,
 // `/enhance-fast`, `/enhance-max`), never reaches Claude; a separate locked-down `claude -p` run rewrites the draft, and the hook blocks the submit with the enhanced
 // prompt as its message, also copied to the clipboard. Needs only Claude Code and node; no omp.
-import { spawnSync } from 'node:child_process';
-import { readFileSync, realpathSync, statSync } from 'node:fs';
-import path from 'node:path';
+import { readFileSync, realpathSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
-import { contentText, runEnhance } from '../core/enhance.mjs';
+import { MARKERS, appendMissingImages, contentText, copyToClipboard, draftImages as coreDraftImages, parseDraft, runEnhance } from '../core/enhance.mjs';
 
-// Prompt markers and their modes (core/enhance.mjs `modes`); the slash commands are /enhance, /enhance-notest, /enhance-fast,
-// /enhance-max.
-export const MARKERS = { '::e': 'full', '::en': 'notest', '::ef': 'fast', '::em': 'max' };
+export { MARKERS, copyToClipboard, parseDraft };
 export const ENV = { claude: 'PROMPT_ENHANCER_CLAUDE', model: 'PROMPT_ENHANCER_MODEL', effort: 'PROMPT_ENHANCER_EFFORT', token: 'PROMPT_ENHANCER_OAUTH_TOKEN' };
 
 // Claude Code withholds the session's sign-in (CLAUDE_CODE_OAUTH_TOKEN) from hooks, so `claude -p` signs in with the login
@@ -18,12 +14,6 @@ export const ENV = { claude: 'PROMPT_ENHANCER_CLAUDE', model: 'PROMPT_ENHANCER_M
 // PROMPT_ENHANCER_OAUTH_TOKEN (from `claude setup-token`) goes to the child as its sign-in.
 export function enhanceEnv(env = process.env) {
 	return env[ENV.token] ? { CLAUDE_CODE_OAUTH_TOKEN: env[ENV.token] } : {};
-}
-
-// → { mode, draft } with the draft after the marker ('' when nothing follows it), or null when the prompt is not an enhance request.
-export function parseDraft(prompt) {
-	const m = String(prompt ?? '').match(/^\s*(::e[nfm]?)(?:\s+([\s\S]*))?$/);
-	return m ? { mode: MARKERS[m[1]], draft: (m[2] ?? '').trim() } : null;
 }
 
 // The enhance request in a hook payload, or null. `/enhance[-notest|-fast|-max] <draft>` arrives as UserPromptExpansion
@@ -34,23 +24,7 @@ export function hookRequest(input) {
 	return { mode: m ? m[1] : 'full', draft: String(input.command_args ?? '').trim() };
 }
 
-// Images are file paths written in the draft (`shot.png`, `@shots/a.jpg`, `"C:\My shots\a.webp"`), relative to the session's
-// folder or absolute; a path to no file is left as text (it may name a file to create). Returns [{ label, file }] in draft
-// order. Hooks get only the prompt text, so a pasted image (`[Image #N]`) cannot reach the enhancer: that throws.
-export function draftImages(draft, cwd) {
-	const text = String(draft);
-	if (/\[Image #\d+\]/.test(text)) throw new Error('Claude Code does not pass pasted images to plugins. Save the image and write its path in your prompt instead, e.g. `::e match this layout C:\\shots\\header.png`.');
-	const out = [], seen = new Set();
-	for (const m of text.matchAll(/"([^"\n]+)"|'([^'\n]+)'|(\S+)/g)) {
-		const label = (m[1] ?? m[2] ?? m[3].replace(/[),.;:!?]+$/, '')).replace(/^@/, '');
-		if (!/\.(png|jpe?g|gif|webp)$/i.test(label)) continue;
-		const file = path.resolve(cwd, label);
-		let isFile = false;
-		try { isFile = statSync(file).isFile(); } catch {}
-		if (isFile && !seen.has(file)) { seen.add(file); out.push({ label, file }); }
-	}
-	return out;
-}
+export const draftImages = (draft, cwd) => coreDraftImages(draft, cwd, { hostName: 'Claude Code', examplePrefix: '::e' });
 
 // Claude Code injects these as user messages; like omp's custom messages they are not the chat.
 const HARNESS = /^<(command-|local-command-|task-notification|system-reminder)/;
@@ -87,8 +61,7 @@ const block = (reason, keepDraft) => ({ decision: 'block', reason, hookSpecificO
 
 // The prompt you send must still name each image for Claude to read it, so a path the enhancer left out is added at the end.
 export function enhancedOutput(text, images = []) {
-	const missing = images.filter(i => !text.includes(i.label) && !text.includes(i.file));
-	return block(missing.length ? `${text}\n\n${missing.map(i => `Image: ${i.file}`).join('\n')}` : text, false);
+	return block(appendMissingImages(text, images), false);
 }
 export const emptyOutput = () => block('Write a prompt after ::e (::en: no new tests or smoke runs, ::ef: fast, ::em: max, the best-in-class feature set) or /enhance (/enhance-notest, /enhance-fast, /enhance-max) first, e.g. `::e fix the login redirect`.', true);
 export function failedOutput(e, env = process.env) {
@@ -103,15 +76,6 @@ export function failedOutput(e, env = process.env) {
 			: `\n\nThe API refused the sign-in of \`${env[ENV.claude] || 'claude'}\` ${why}. Hooks don't get this session's sign-in, so the enhancer uses that claude's own login, which may be another account or organization. Run \`claude setup-token\`, sign in to the account and organization this session uses, and set ${ENV.token} to the token (e.g. in the \`env\` of ~/.claude/settings.json); or sign that claude in to the same organization with \`claude auth login\`.`;
 	}
 	return block(`Enhance failed: ${msg}`, true);
-}
-
-// A hook can't put text back in the prompt box, so the enhanced prompt goes to the clipboard, to paste with Ctrl+V.
-const CLIPBOARD = { win32: [['clip']], darwin: [['pbcopy']], linux: [['wl-copy'], ['xclip', '-selection', 'clipboard']] };
-export function copyToClipboard(text) {
-	// clip.exe takes UTF-16LE (a BOM would be pasted too); anything else it reads in the console code page. pbcopy needs a UTF-8 locale.
-	const input = process.platform === 'win32' ? Buffer.from(text, 'utf16le') : text;
-	const opts = { input, stdio: ['pipe', 'ignore', 'ignore'], windowsHide: true, timeout: 5000, env: { ...process.env, LC_CTYPE: 'UTF-8' } };
-	return (CLIPBOARD[process.platform] || []).some(([cmd, ...args]) => spawnSync(cmd, args, opts).status === 0);
 }
 
 export async function main() {

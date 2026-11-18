@@ -1,0 +1,6 @@
+{
+  "name": "prompt-enhancer",
+  "displayName": "Prompt Enhancer",
+  "version": "0.5.0",
+  "description": "Rewrites a coding-agent prompt into a repo-grounded spec before you send it (::e / /enhance, ::en / /enhance-notest, ::ef / /enhance-fast, ::em / /enhance-max)."
+}

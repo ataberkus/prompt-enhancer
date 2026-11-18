@@ -1,0 +1,23 @@
+{
+  "prompt-enhancer": {
+    "PreInvocation": [
+      {
+        "type": "command",
+        "command": "node ./antigravity-cli/index.mjs",
+        "timeout": 300
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ./core/antigravity-guard.mjs",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}

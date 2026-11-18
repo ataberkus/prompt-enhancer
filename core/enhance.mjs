@@ -1,11 +1,12 @@
-// Prompt enhancer core: one read-only, locked-down agent run (`omp -p` or `claude -p`) that rewrites a draft into a
-// repo-grounded spec. Host-agnostic: omp/index.mjs and claude/index.mjs are front ends; others can call runEnhance the same way.
+// Prompt enhancer core: one read-only, locked-down agent run (`omp -p`, `claude -p` or `agy -p`) that rewrites a draft into a
+// repo-grounded spec. Host-agnostic: omp/index.mjs, claude/index.mjs, antigravity-cli/index.mjs and antigravity/index.mjs are
+// front ends; others can call runEnhance the same way.
 // system.md, system-fast.md, system-max.md, light-checks.md, overlay.yml and guard.mjs are also in omp-companion
-// (companion/enhance-prompts.mjs ENHANCE_*); keep them in sync. claude-guard.mjs is guard.mjs's rules for Claude Code's
-// tools; keep the two in step.
-import { spawn } from 'node:child_process';
+// (companion/enhance-prompts.mjs ENHANCE_*); keep them in sync. claude-guard.mjs and antigravity-guard.mjs apply guard.mjs's
+// rules to Claude Code's and Antigravity's tools; keep them in step.
+import { spawn, spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { readFileSync, rmSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { createInterface } from 'node:readline';
 import os from 'node:os';
@@ -20,6 +21,7 @@ export const files = {
 	overlay: path.join(here, 'overlay.yml'),
 	guard: path.join(here, 'guard.mjs'),
 	claudeGuard: path.join(here, 'claude-guard.mjs'),
+	antigravityGuard: path.join(here, 'antigravity-guard.mjs'),
 };
 
 // A checkout with core.autocrlf has CRLF prompt files; the swaps below match LF.
@@ -47,16 +49,31 @@ const FULL_REGRESSION = ', and include a regression check in Done when.';
 // `max`: the draft as a product brief, expanded into the best-in-class feature set of its kind, with the full mode's checks
 // (system-max.md, 12 lookups).
 export const modes = {
-	full: { lookups: 12, prompt: () => text(files.system) },
+	full: {
+		lookups: 12, key: 'alt+e', command: 'enhance', marker: '::e', verb: 'Enhancing', title: 'Enhance',
+		what: 'a repo-grounded spec',
+		prompt: () => text(files.system),
+	},
 	notest: {
-		lookups: 12,
+		lookups: 12, key: 'alt+shift+n', command: 'enhance-notest', marker: '::en', verb: 'Enhancing (no tests)', title: 'Enhance (no tests)',
+		what: 'a repo-grounded spec without new tests or smoke runs',
 		prompt: () => swap(swap(text(files.system), FULL_CHECKS, lightChecks()), FULL_REGRESSION, '; Done when adds no new regression test unless the draft asks for one.'),
 	},
-	fast: { lookups: 6, prompt: () => swap(text(files.systemFast), '{{light-checks}}', lightChecks()) },
-	max: { lookups: 12, prompt: () => text(files.systemMax) },
+	fast: {
+		lookups: 6, key: 'alt+shift+e', command: 'enhance-fast', marker: '::ef', verb: 'Fast-enhancing', title: 'Enhance (fast)',
+		what: 'a lean prompt (existing checks only, no new tests or smoke runs)',
+		prompt: () => swap(text(files.systemFast), '{{light-checks}}', lightChecks()),
+	},
+	max: {
+		lookups: 12, key: 'alt+shift+m', command: 'enhance-max', marker: '::em', verb: 'Max-enhancing', title: 'Enhance (max)',
+		what: 'a best-in-class spec (the full feature set of the best products of its kind)',
+		prompt: () => text(files.systemMax),
+	},
 };
-// guard.mjs runs inside the omp child, so it gets its lookup limit through the environment.
+export const MARKERS = Object.fromEntries(Object.entries(modes).map(([id, m]) => [m.marker, id]));
+// guard.mjs runs inside the omp child and antigravity-guard.mjs inside agy, so they get their limit/counter through the environment.
 export const LOOKUP_LIMIT_ENV = 'PROMPT_ENHANCER_LOOKUP_LIMIT';
+export const GUARD_COUNTER_ENV = 'PROMPT_ENHANCER_GUARD_COUNTER';
 
 // The draft never goes in argv (stdin only): no quoting hazards and no Windows 32K command-line limit.
 // --system-prompt replaces OMP's coding-agent prompt (omp takes a value with a newline as the text, not a file path); the
@@ -107,6 +124,43 @@ export function ompInput(text, images = []) {
 	return `${text}\n<images>\n${list.join('\n')}\n</images>`;
 }
 
+// agy 1.5.8 reads NDJSON user turns on stdin with `--input-format stream-json --output-format stream-json -p ""`, so the
+// draft never goes in argv. `--disable-slash-commands` prevents recursive slash/skill expansion, and leaving off
+// `--dangerously-skip-permissions` keeps default `request-review` while `antigravity-guard.mjs` (when installed as the
+// plugin's PreToolUse hook) enforces read/grep/glob-only lookups, repo bounds, no .env and the mode's lookup limit.
+export function antigravityArgs({ model, thinking } = {}) {
+	return ['--input-format', 'stream-json', '--output-format', 'stream-json', '--disable-slash-commands', '--print-timeout', '240s',
+		...(model ? ['--model', model] : []), ...(thinking ? ['--effort', thinking] : []), '-p', ''];
+}
+
+// agy's stream-json input accepts text content blocks only and has no --system-prompt CLI flag, so the mode's system
+// prompt rides at the top of the user message inside <instructions>, and image paths are listed in <images> for view_file.
+export function antigravityInput(text, images = [], mode = 'full') {
+	for (const { file } of images) imageMedia(file);
+	const imgBlock = images.length
+		? `\n<images>\n${images.map(({ label, file }, i) => `${label}: image ${i + 1} (${path.resolve(file)})`).join('\n')}\n</images>`
+		: '';
+	const content = `<instructions>\n${modes[mode].prompt()}\n</instructions>\n\n${text}${imgBlock}`;
+	return JSON.stringify({ event: 'user', message: { role: 'user', content } }) + '\n';
+}
+
+// Finds the Antigravity CLI binary: explicit override, current agy executable, default ~/.gemini/bin/agy(.exe), or PATH.
+export function findAntigravityBin(env = process.env, { execPath = process.execPath, homeDir = os.homedir(), platform = process.platform, exists = existsSync } = {}) {
+	if (env?.PROMPT_ENHANCER_ANTIGRAVITY) return env.PROMPT_ENHANCER_ANTIGRAVITY;
+	if (execPath && /^agy(\.exe)?$/i.test(path.basename(execPath))) return execPath;
+	const installed = path.join(homeDir, '.gemini', 'bin', platform === 'win32' ? 'agy.exe' : 'agy');
+	if (exists(installed)) return installed;
+	return 'agy';
+}
+
+function parseHttpError(msg, statusCode) {
+	const m = String(msg || '').match(/\bHTTP\s+(401|403)\b|\bstatus(?:\s+code)?[:\s]+(401|403)\b/i);
+	const status = Number(statusCode || m?.[1] || m?.[2] || 0);
+	if (!status) return undefined;
+	const code = String(msg || '').match(/\b(UNAUTHENTICATED|PERMISSION_DENIED|oauth_[a-z_]+|invalid_grant)\b/i)?.[1];
+	return { status, ...(code ? { code } : {}) };
+}
+
 // Per engine: the default binary, its argv, and how one JSON output line reports a lookup, the answer or a failure.
 export const engines = {
 	omp: {
@@ -122,6 +176,23 @@ export const engines = {
 			if (f.type === 'assistant') for (const c of f.message?.content || []) { if (c?.type === 'tool_use') on.step(c.name, c.input); }
 			// A refused request (401/403: wrong account, organization or token) carries its HTTP status and error code.
 			else if (f.type === 'result') f.is_error || f.subtype !== 'success' ? on.error(String(f.result || f.subtype), f.api_error_status ? { status: f.api_error_status, code: f.api_error_code } : undefined) : on.answer(String(f.result ?? ''));
+		},
+	},
+	antigravity: {
+		bin: 'agy', args: antigravityArgs, input: antigravityInput,
+		env: ({ lookups }) => ({ [GUARD_COUNTER_ENV]: lookups }),
+		event(f, on) {
+			if (f.event === 'step_update' && f.step_update?.step_type === 'tool' && f.step_update?.state === 'ACTIVE') {
+				const info = f.step_update.tool_info || {};
+				on.step(f.step_update.tool_name || info.name, info.parameters || {});
+			} else if (f.event === 'result' && f.result) {
+				const r = f.result;
+				if (r.status === 'SUCCESS') on.answer(String(r.response ?? ''));
+				else {
+					const msg = String(r.error || r.finished_reason || r.status || 'Antigravity CLI failed.');
+					on.error(msg, parseHttpError(msg, r.status_code ?? r.api_error_status));
+				}
+			}
 		},
 	},
 };
@@ -143,6 +214,80 @@ export function branchMessages(entries) {
 	return out;
 }
 
+// Antigravity transcript (JSONL) → [{role, text}] for enhanceInput. Keeps explicit user prompts and model replies.
+export function antigravityTranscriptMessages(jsonl) {
+	const out = [];
+	for (const line of String(jsonl || '').split('\n')) {
+		let e;
+		try { e = JSON.parse(line); } catch { continue; }
+		if (e?.type === 'USER_INPUT' && (!e.source || e.source === 'USER_EXPLICIT')) {
+			const raw = String(e.content ?? '').replace(/^<USER_REQUEST>\r?\n?([\s\S]*?)\r?\n?<\/USER_REQUEST>$/, '$1').trim();
+			if (raw) out.push({ role: 'user', text: raw });
+		} else if (e?.type === 'PLANNER_RESPONSE' && (!e.source || e.source === 'MODEL')) {
+			const text = contentText(e.content).trim();
+			if (text) out.push({ role: 'assistant', text });
+		}
+	}
+	return out;
+}
+
+// Last real model reported in an Antigravity transcript.
+export function antigravityTranscriptModel(jsonl) {
+	let model;
+	for (const line of String(jsonl || '').split('\n')) {
+		let e;
+		try { e = JSON.parse(line); } catch { continue; }
+		if (e?.type === 'PLANNER_RESPONSE' && typeof e.model === 'string' && e.model && e.model !== 'auto') model = e.model;
+	}
+	return model;
+}
+
+// → { mode, draft } with the draft after a leading ::e / ::en / ::ef / ::em, or null for other prompts.
+export function parseDraft(prompt) {
+	const m = String(prompt ?? '').match(/^\s*(::e[nfm]?)(?:\s+([\s\S]*))?$/);
+	return m ? { mode: MARKERS[m[1]], draft: (m[2] ?? '').trim() } : null;
+}
+
+const SLASH_COMMANDS = Object.fromEntries(Object.entries(modes).map(([id, m]) => [m.command, id]));
+// → { mode, draft } for /enhance, /enhance-notest, /enhance-fast, /enhance-max (with optional namespace prefix), or null.
+export function parseSlashCommand(prompt) {
+	const m = String(prompt ?? '').match(/^\s*\/(?:[a-z0-9_-]+:)?(enhance(?:-(?:notest|fast|max))?)(?:\s+([\s\S]*))?$/i);
+	if (!m) return null;
+	const mode = SLASH_COMMANDS[m[1].toLowerCase()];
+	return mode ? { mode, draft: (m[2] ?? '').trim() } : null;
+}
+
+// Images are file paths written in the draft (`shot.png`, `@shots/a.jpg`, `"C:\My shots\a.webp"`), relative to cwd or
+// absolute; a path to no file is left as text (it may name a file to create). Returns [{ label, file }] in draft order.
+export function draftImages(draft, cwd, { hostName = 'Claude Code', examplePrefix = '::e' } = {}) {
+	const text = String(draft);
+	if (/\[Image #\d+\]/.test(text)) throw new Error(`${hostName} does not pass pasted images to plugins. Save the image and write its path in your prompt instead, e.g. \`${examplePrefix} match this layout C:\\shots\\header.png\`.`);
+	const out = [], seen = new Set();
+	for (const m of text.matchAll(/"([^"\n]+)"|'([^'\n]+)'|(\S+)/g)) {
+		const label = (m[1] ?? m[2] ?? m[3].replace(/[),.;:!?]+$/, '')).replace(/^@/, '');
+		if (!/\.(png|jpe?g|gif|webp)$/i.test(label)) continue;
+		const file = path.resolve(cwd, label);
+		let isFile = false;
+		try { isFile = statSync(file).isFile(); } catch {}
+		if (isFile && !seen.has(file)) { seen.add(file); out.push({ label, file }); }
+	}
+	return out;
+}
+
+// Appends any draft image path that the enhanced prompt omitted so the target agent still receives it.
+export function appendMissingImages(text, images = []) {
+	const missing = images.filter(i => !text.includes(i.label) && !text.includes(i.file));
+	return missing.length ? `${text}\n\n${missing.map(i => `Image: ${i.file}`).join('\n')}` : text;
+}
+
+const CLIPBOARD = { win32: [['clip']], darwin: [['pbcopy']], linux: [['wl-copy'], ['xclip', '-selection', 'clipboard']] };
+export function copyToClipboard(text) {
+	// clip.exe takes UTF-16LE (a BOM would be pasted too); anything else it reads in the console code page. pbcopy needs a UTF-8 locale.
+	const input = process.platform === 'win32' ? Buffer.from(text, 'utf16le') : text;
+	const opts = { input, stdio: ['pipe', 'ignore', 'ignore'], windowsHide: true, timeout: 5000, env: { ...process.env, LC_CTYPE: 'UTF-8' } };
+	return (CLIPBOARD[process.platform] || []).some(([cmd, ...args]) => spawnSync(cmd, args, opts).status === 0);
+}
+
 // The last 6 turns, each run of assistant messages reduced to its last (the reply the user saw). Clips keep both ends: the
 // start holds the ask or context, the end of a reply its options and question; the latest reply gets the most room.
 // Tag lookalikes inside messages are defused so quoted text cannot close <conversation> or open a <draft>.
@@ -156,13 +301,15 @@ export function enhanceInput(draft, messages) {
 	return (lines.length ? `<conversation>\n${lines.join('\n')}\n</conversation>\n` : '') + `<draft>\n${defuse(String(draft))}\n</draft>`;
 }
 
-// omp's tools are read/grep/glob with `path`; Claude Code's are Read/Grep/Glob with `file_path`.
+// omp's tools are read/grep/glob with `path`; Claude Code's are Read/Grep/Glob with `file_path`; Antigravity's are
+// view_file/read_file/grep_search/find_by_name with `AbsolutePath`/`Path`/`Query`/`Pattern`.
 export function stepLabel(toolName, args, cwd) {
-	const a = args || {}, tool = String(toolName || '').toLowerCase(), file = a.path ?? a.file_path;
+	const a = args || {}, tool = String(toolName || '').toLowerCase();
+	const file = a.path ?? a.file_path ?? a.AbsolutePath ?? a.Path;
 	let s;
-	if (tool === 'read') s = 'reading ' + (file ? path.relative(cwd, path.resolve(cwd, String(file))).replace(/\\/g, '/') || '.' : 'a file');
-	else if (tool === 'grep') s = `searching "${a.pattern ?? ''}"`;
-	else if (tool === 'glob') s = 'listing ' + (a.pattern ?? 'files');
+	if (tool === 'read' || tool === 'view_file' || tool === 'read_file') s = 'reading ' + (file ? path.relative(cwd, path.resolve(cwd, String(file))).replace(/\\/g, '/') || '.' : 'a file');
+	else if (tool === 'grep' || tool === 'grep_search') s = `searching "${a.pattern ?? a.Query ?? ''}"`;
+	else if (tool === 'glob' || tool === 'find_by_name') s = 'listing ' + (a.pattern ?? a.Pattern ?? 'files');
 	else s = String(toolName || 'working');
 	return s.length > 80 ? s.slice(0, 79) + '…' : s;
 }
@@ -186,11 +333,13 @@ export function runEnhance({ draft, messages = [], images = [], cwd, engine = 'o
 		if (!eng) throw new Error(`Unknown enhance engine: ${engine}`);
 		if (!modes[mode]) throw new Error(`Unknown enhance mode: ${mode}`);
 		if (images.length && !eng.input) throw new Error(`The ${engine} engine takes no images.`);
-		const stdin = eng.input ? eng.input(enhanceInput(draft, messages), images) : enhanceInput(draft, messages);
+		const stdin = eng.input ? eng.input(enhanceInput(draft, messages), images, mode) : enhanceInput(draft, messages);
 		const lookups = path.join(os.tmpdir(), `prompt-enhancer-${randomUUID()}.lookups`);
-		const child = spawn(bin || eng.bin, eng.args({ model, thinking, lookups, images, mode }), {
-			cwd, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true,
-			env: { ...process.env, ...env, NO_COLOR: '1', FORCE_COLOR: '0', [LOOKUP_LIMIT_ENV]: String(modes[mode].lookups) },
+		const resolvedBin = bin || (engine === 'antigravity' ? findAntigravityBin(env ? { ...process.env, ...env } : process.env) : eng.bin);
+		const useShell = process.platform === 'win32' && /\.(cmd|bat)$/i.test(resolvedBin);
+		const child = spawn(resolvedBin, eng.args({ model, thinking, lookups, images, mode }), {
+			cwd, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, ...(useShell ? { shell: true } : {}),
+			env: { ...process.env, ...env, ...(eng.env ? eng.env({ lookups, mode }) : {}), NO_COLOR: '1', FORCE_COLOR: '0', [LOOKUP_LIMIT_ENV]: String(modes[mode].lookups) },
 		});
 		let stderr = '', answer = '', failure = '', api, timedOut = false, done = false;
 		const kill = () => child.kill();
